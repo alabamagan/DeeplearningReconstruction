@@ -1,1 +1,5 @@
+.idea
+TestData
+checkpoint*
+Backup
 *.pyc
