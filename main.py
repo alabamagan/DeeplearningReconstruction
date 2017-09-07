@@ -12,30 +12,26 @@ from dataloader import BatchLoader
 
 def train(net, b, trainsteps, epoch=-1):
     if (os.path.isfile("network_E%03d"%epoch) and epoch != -1):
+        print "Loading network..."
         net = torch.load("network_E%03d"%epoch)
     elif (os.path.isfile("checkpoint_E%03d"%epoch)):
+        print "Loading checkpoint..."
         net = torch.load("checkpoint_E%03d"%epoch)
-    else:
-        net.train(True)
 
-    optimizer = torch.optim.SGD([{'params': net.convsModules.parameters(),
-                                  'lr': 20, 'momentum':1e-1, 'dampening':1e-3},
-                                 {'params': net.deconvsModules.parameters(), 'lr': 10},
-                                 {'params': net.fcModules.parameters(), 'lr': 1e-3},
-                                 {'params': net.bnModules.parameters(), 'lr': 1e-3},
-                                 {'params': net.linear1.parameters(),
-                                  'lr': 1e-5, 'momentum':0, 'dampening':1e-5}
-                                 ])
+    net.train()
 
-    fig = plt.figure(1, figsize=[13,6])
-    ax1 = fig.add_subplot(131)
-    ax2 = fig.add_subplot(132)
-    ax3 = fig.add_subplot(133)
+    # optimizer = torch.optim.SGD(net.parameters(), lr=10, weight_decay=1e-1)
+    optimizer = None
+
+    # fig = plt.figure(1, figsize=[13,6])
+    # ax1 = fig.add_subplot(131)
+    # ax2 = fig.add_subplot(132)
+    # ax3 = fig.add_subplot(133)
 
     criterion = torch.nn.SmoothL1Loss().cuda()
-    criterion.size_average = False
+    criterion.size_average = True
     normalize = torch.nn.SmoothL1Loss().cuda()
-    normalize.size_average = False
+    normalize.size_average = True
     losslist = []
     for i in xrange(trainsteps):
         sample = b[5]
@@ -47,16 +43,35 @@ def train(net, b, trainsteps, epoch=-1):
         i2 = Variable(torch.from_numpy(i2))
         i3 = Variable(torch.from_numpy(i3))
 
-        bstart = np.random.randint(0, gt.data.size()[0] - 10)
+        bstart = 5
         bstop = bstart + 10
+
         output = net.forward(i2[bstart:bstop].cuda(), i3[bstart:bstop].cuda())
-        loss = criterion((output.squeeze()), (gt[bstart:bstop])) / \
-               normalize(i3[bstart:bstop].squeeze().float().cuda(), gt[bstart:bstop])
+        #=================================================
+        # Add modules to optimizer or else it wont budge
+        #-----------------------------------------------
+        if (optimizer == None):
+            optimizer = torch.optim.SGD([{'params': net.convsModules.parameters(),
+                                          'lr': 20, 'momentum':1, 'dampening': 1e-3},
+                                         {'params': net.deconvsModules.parameters(), 'lr': 10},
+                                         {'params': net.fcModules.parameters(), 'lr': 1e-3},
+                                         {'params': net.bnModules.parameters(), 'lr': 1e-3},
+                                         {'params': net.linear1.parameters(),
+                                          'lr': 1e-2, 'momentum':0, 'dampening':1e-5}
+                                         ])
+            optimizer.zero_grad()
+
+        loss = criterion((output.squeeze()), (gt[bstart:bstop])) / normalize(i3[bstart:bstop].float().cuda(), gt[bstart:bstop]) - 1
         print "[Step %03d] Loss: %.05f"%(i, loss.data[0])
         losslist.append(loss.data[0])
         loss.backward()
+
+
         optimizer.step()
-        # #
+
+        #======================================
+        # Plot for visualization of result
+        #----------------------------------
         # for j in xrange(output.data.size(0) - 1):
         #     ax1.cla()
         #     ax2.cla()
@@ -119,6 +134,8 @@ def main():
     # Train
     #---------------------
     net = network.Net()
+    net.zero_grad()
+    # net = torch.load("./Backup/Gen4_BatchNormConvolution_GoodForOneImage")
     net.cuda()
     l = train(net, b, trainsteps=2500, epoch=0)
     plt.plot(l)

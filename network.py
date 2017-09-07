@@ -5,6 +5,7 @@ import torchvision
 from torch.autograd import Variable
 from algorithm import ExtractPatchIndexs
 from pyinn import im2col, col2im
+from pyinn.im2col import Im2Col, Col2Im
 
 # testing
 import matplotlib.pyplot as plt
@@ -17,7 +18,7 @@ class Net(nn.Module):
         self.kernelsize1 = 11
         self.kernelsize2 = 5
 
-        self.linear1 = nn.Linear(1, 1, bias=False)
+        self.linear1 = nn.Linear(1, 1)
 
         self.convsModules = nn.ModuleList()
         self.deconvsModules = nn.ModuleList()
@@ -27,8 +28,9 @@ class Net(nn.Module):
         self.windows = np.array([16, 16])
         self.overlap = np.array([8, 8])
 
-        self.norm1 = nn.BatchNorm2d(24)
-        self.norm2 = nn.BatchNorm2d(60)
+
+        self.im2col = Im2Col(self.windows, self.windows - self.overlap, 0)
+        self.col2im = Col2Im(self.windows, self.windows - self.overlap, 0)
 
     def forward(self, x1, x2):
         """
@@ -46,14 +48,18 @@ class Net(nn.Module):
         inshape = x1.data.size()
 
         x = x2 - x1
+        # x = self.linear1(x.view(np.prod(x.data.size()), 1))
+        # print x.data.size()
+        # x = x.view_as(x2)
 
-        x = im2col(x, self.windows, self.windows - self.overlap, 0)
+
+        x = self.im2col(x)
         s = x.data.size()
 
         V = None
-        for i in xrange(s[1]):
+        for i in xrange(s[3]):
             l_V = None
-            for j in xrange(s[2]):
+            for j in xrange(s[4]):
                 try:
                     l_conv1 = self.convsModules[0, i, j]
                     l_conv2 = self.convsModules[1, i, j]
@@ -68,13 +74,13 @@ class Net(nn.Module):
                     l_conv1 = nn.Conv2d(1, 24, kernel_size=self.kernelsize1)
                     l_conv2 = nn.Conv2d(24, 60, kernel_size=self.kernelsize2)
                     l_fc1 = nn.ELU()
-                    l_fc1.train(false)
                     l_fc2 = nn.ELU()
                     l_fc3 = nn.ELU()
                     l_bn1 = nn.BatchNorm2d(24)
                     l_bn2 = nn.BatchNorm2d(60)
                     l_deconv1 = nn.ConvTranspose2d(24, 1, kernel_size=self.kernelsize1)
                     l_deconv2 = nn.ConvTranspose2d(60, 24, kernel_size=self.kernelsize2)
+                    l_conv1.train()
                     if (x1.is_cuda):
                         l_conv1.cuda()
                         l_conv2.cuda()
@@ -95,57 +101,43 @@ class Net(nn.Module):
                     self.deconvsModules[0, i, j] = l_deconv1
                     self.deconvsModules[1, i, j] = l_deconv2
 
-                l_x = x[:,i, j].unsqueeze(1)
-                l_x = l_conv1(l_x)
-                l_x = l_bn1(l_x)
-                l_x = l_fc1(l_x)
 
-                l_x = l_conv2(l_x)
-                l_x = l_bn2(l_x)
-                l_x = l_fc2(l_x)
 
-                l_x = l_deconv2(l_x)
-                l_x = l_fc3(l_x)
+                l_x = x[:, :, :, i, j].unsqueeze(1)
 
-                l_x = l_deconv1(l_x)
+                if abs(l_x.data.sum()) >= 1e-5:
+                    l_x = l_conv1(l_x)
+                    l_x = l_bn1(l_x)
+                    l_x = l_fc1(l_x)
+
+                    l_x = l_conv2(l_x)
+                    l_x = l_bn2(l_x)
+                    l_x = l_fc2(l_x)
+
+                    l_x = l_deconv2(l_x)
+                    l_x = l_fc3(l_x)
+
+                    l_x = l_deconv1(l_x).squeeze()
+                else:
+                    l_x = l_x.squeeze()
 
                 if (l_V is None):
-                    l_V = l_x.unsqueeze(2)
+                    l_V = l_x.unsqueeze(-1).unsqueeze(-1)
                 else:
-                    l_V = torch.cat([l_x.unsqueeze(2), l_V], 2)
+                    l_V = torch.cat([l_x.unsqueeze(-1).unsqueeze(-1), l_V], -1)
 
             if (V is None):
                 V = l_V
             else:
-                V = torch.cat([l_V, V], 1)
-
-        x = col2im(V.contiguous(), self.windows, self.windows - self.overlap, 0)
-        # V = None
-        # for i in xrange(s[0]):
-        #     l_v = None
-        #     for j in xrange(s[1]):
-        #         counter = i*s[1] + j
-        #
-        #         l_x = x[counter].unsqueeze(0).unsqueeze(0)
-        #         if (l_v is None):
-        #             l_v = l_x
-        #         else:
-        #             l_v = torch.cat([l_v, l_x], 0)
-        #
-        #     if (V is None):
-        #         V = l_v
-        #     else:
-        #         V = torch.cat([V, l_v], 1)
-        #
-        # V = V.squeeze()
-        # V = V.transpose(0, 3).transpose(1, 2).unsqueeze(0) # (1 x win1 x win2 x p1 x p2)
+                V = torch.cat([l_V, V], -2)
 
 
-        # x2s = outX2.data.size()
-        # outX2 = self.linear1(outX2.view(np.prod(x2s), 1))
-        # outX2 = outX2.view_as(x2)
+        x = self.col2im(V)
+
+        x2s = x.data.size()
+        x = self.linear1(x.view(np.prod(x2s), 1))
+        x = x.view_as(x2)
         x = x2 - x
-        # x = outX2
         return x
 
 
