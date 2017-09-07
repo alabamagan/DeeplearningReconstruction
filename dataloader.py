@@ -23,7 +23,7 @@ class BatchLoader(Dataset):
             im = np.load(filename)
 
             if (idy is None):
-                out[suffix] = im[np.random.randint(0, im.shape[0] - 1)]
+                out[suffix] = im
             else:
                 out[suffix] = im[idy]
 

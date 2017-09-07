@@ -13,35 +13,19 @@ import numpy as np
 class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
-        # 1 input image channel, 6 output channels, 5x5 square convolution
-        # kernel
-        # self.windows = np.array([2, 32, 32])
-        # self.overlap = np.array([0, 16, 16])
 
-        self.conv1 = nn.Conv2d(1, 24, (5, 5))
-        self.conv2 = nn.Conv2d(24, 60, 5)
-        self.deconv1 = nn.ConvTranspose2d(24, 1, (5, 5))
-        self.deconv2 = nn.ConvTranspose2d(60, 24, 5)
-
-        self.fc1 = nn.ELU()
-        self.fc2 = nn.ELU()
-        self.fc3 = nn.ELU()
+        self.kernelsize1 = 11
+        self.kernelsize2 = 5
 
         self.linear1 = nn.Linear(1, 1, bias=False)
 
         self.convsModules = nn.ModuleList()
-        self.convsModules.append(self.conv1)
-        self.convsModules.append(self.conv2)
-        self.convsModules.append(self.deconv1)
-        self.convsModules.append(self.deconv2)
+        self.deconvsModules = nn.ModuleList()
+        self.fcModules = nn.ModuleList()
+        self.bnModules = nn.ModuleList()
 
-        self.miscModules = nn.ModuleList()
-        self.miscModules.append(self.fc1)
-        self.miscModules.append(self.fc2)
-        self.miscModules.append(self.fc3)
-
-        self.windows = np.array([2, 16, 16])
-        self.overlap = np.array([0, 8, 8])
+        self.windows = np.array([16, 16])
+        self.overlap = np.array([8, 8])
 
         self.norm1 = nn.BatchNorm2d(24)
         self.norm2 = nn.BatchNorm2d(60)
@@ -63,55 +47,104 @@ class Net(nn.Module):
 
         x = x2 - x1
 
-        # Unfold
-        #-----------
-        x.data = x.data.unfold(3, windows[1], overlap[1]).unfold(4, windows[2], overlap[2]).squeeze()
+        x = im2col(x, self.windows, self.windows - self.overlap, 0)
         s = x.data.size()
-        x = x.contiguous().view(1, s[0]*s[1], windows[1], windows[2])
-        x = x.transpose(0, 1)
-        outX = x.contiguous().view(s[0]*s[1], 1, windows[1], windows[2])
-
-        x = self.conv1(outX)
-        x = self.norm1(x)
-        x = self.fc1(x)
-
-        x = self.conv2(torch.squeeze(x))
-        x = self.norm2(x)
-        x = self.fc2(x)
-
-        x = self.deconv2(x)
-        x = self.fc3(x)
-
-        s2 = x.data.size()
-        x = self.deconv1(x.view(s2[0], s2[1], s2[2], s2[3]))
 
         V = None
-        for i in xrange(s[0]):
-            l_v = None
-            for j in xrange(s[1]):
-                counter = i*s[1] + j
+        for i in xrange(s[1]):
+            l_V = None
+            for j in xrange(s[2]):
+                try:
+                    l_conv1 = self.convsModules[0, i, j]
+                    l_conv2 = self.convsModules[1, i, j]
+                    l_fc1 = self.fcModules[0, i, j]
+                    l_fc2 = self.fcModules[1, i, j]
+                    l_fc3 = self.fcModules[2, i, j]
+                    l_bn1 = self.bnModules[0, i, j]
+                    l_bn2 = self.bnModules[1, i, j]
+                    l_deconv1 = self.deconvsModules[0, i, j]
+                    l_deconv2 = self.deconvsModules[1, i, j]
+                except KeyError:
+                    l_conv1 = nn.Conv2d(1, 24, kernel_size=self.kernelsize1)
+                    l_conv2 = nn.Conv2d(24, 60, kernel_size=self.kernelsize2)
+                    l_fc1 = nn.ELU()
+                    l_fc1.train(false)
+                    l_fc2 = nn.ELU()
+                    l_fc3 = nn.ELU()
+                    l_bn1 = nn.BatchNorm2d(24)
+                    l_bn2 = nn.BatchNorm2d(60)
+                    l_deconv1 = nn.ConvTranspose2d(24, 1, kernel_size=self.kernelsize1)
+                    l_deconv2 = nn.ConvTranspose2d(60, 24, kernel_size=self.kernelsize2)
+                    if (x1.is_cuda):
+                        l_conv1.cuda()
+                        l_conv2.cuda()
+                        l_fc1.cuda()
+                        l_fc2.cuda()
+                        l_fc3.cuda()
+                        l_bn1.cuda()
+                        l_bn2.cuda()
+                        l_deconv1.cuda()
+                        l_deconv2.cuda()
+                    self.convsModules[0, i, j] = l_conv1
+                    self.convsModules[1, i, j] = l_conv2
+                    self.fcModules[0, i, j] = l_fc1
+                    self.fcModules[1, i, j] = l_fc2
+                    self.fcModules[2, i, j] = l_fc3
+                    self.bnModules[0, i, j] = l_bn1
+                    self.bnModules[1, i, j] = l_bn2
+                    self.deconvsModules[0, i, j] = l_deconv1
+                    self.deconvsModules[1, i, j] = l_deconv2
 
-                l_x = x[counter].unsqueeze(0).unsqueeze(0)
-                if (l_v is None):
-                    l_v = l_x
+                l_x = x[:,i, j].unsqueeze(1)
+                l_x = l_conv1(l_x)
+                l_x = l_bn1(l_x)
+                l_x = l_fc1(l_x)
+
+                l_x = l_conv2(l_x)
+                l_x = l_bn2(l_x)
+                l_x = l_fc2(l_x)
+
+                l_x = l_deconv2(l_x)
+                l_x = l_fc3(l_x)
+
+                l_x = l_deconv1(l_x)
+
+                if (l_V is None):
+                    l_V = l_x.unsqueeze(2)
                 else:
-                    l_v = torch.cat([l_v, l_x], 0)
+                    l_V = torch.cat([l_x.unsqueeze(2), l_V], 2)
 
             if (V is None):
-                V = l_v
+                V = l_V
             else:
-                V = torch.cat([V, l_v], 1)
+                V = torch.cat([l_V, V], 1)
 
-        V = V.squeeze()
-        V = V.transpose(0, 3).transpose(1, 2).unsqueeze(0) # (1 x win1 x win2 x p1 x p2)
+        x = col2im(V.contiguous(), self.windows, self.windows - self.overlap, 0)
+        # V = None
+        # for i in xrange(s[0]):
+        #     l_v = None
+        #     for j in xrange(s[1]):
+        #         counter = i*s[1] + j
+        #
+        #         l_x = x[counter].unsqueeze(0).unsqueeze(0)
+        #         if (l_v is None):
+        #             l_v = l_x
+        #         else:
+        #             l_v = torch.cat([l_v, l_x], 0)
+        #
+        #     if (V is None):
+        #         V = l_v
+        #     else:
+        #         V = torch.cat([V, l_v], 1)
+        #
+        # V = V.squeeze()
+        # V = V.transpose(0, 3).transpose(1, 2).unsqueeze(0) # (1 x win1 x win2 x p1 x p2)
 
-        outX2 = col2im(V.contiguous() # remember to contiguous() here
-                       , windows[1:], windows[1:] - overlap[1:], [0,0])
 
-        x2s = outX2.data.size()
-        outX2 = self.linear1(outX2.view(np.prod(x2s), 1))
-        outX2 = outX2.view_as(x2)
-        x = x2 - outX2
+        # x2s = outX2.data.size()
+        # outX2 = self.linear1(outX2.view(np.prod(x2s), 1))
+        # outX2 = outX2.view_as(x2)
+        x = x2 - x
         # x = outX2
         return x
 
