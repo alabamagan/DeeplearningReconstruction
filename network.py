@@ -25,8 +25,8 @@ class Net(nn.Module):
         self.fcModules = nn.ModuleList()
         self.bnModules = nn.ModuleList()
 
-        self.windows = np.array([16, 16])
-        self.overlap = np.array([8, 8])
+        self.windows = np.array([32, 32])
+        self.overlap = np.array([16, 16])
 
 
         self.im2col = Im2Col(self.windows, self.windows - self.overlap, 0)
@@ -124,19 +124,19 @@ class Net(nn.Module):
                 if (l_V is None):
                     l_V = l_x.unsqueeze(-1).unsqueeze(-1)
                 else:
-                    l_V = torch.cat([l_x.unsqueeze(-1).unsqueeze(-1), l_V], -1)
+                    l_V = torch.cat([l_V, l_x.unsqueeze(-1).unsqueeze(-1)], -1)
 
             if (V is None):
                 V = l_V
             else:
-                V = torch.cat([l_V, V], -2)
+                V = torch.cat([V, l_V], -2)
 
 
         x = self.col2im(V)
 
-        x2s = x.data.size()
-        x = self.linear1(x.view(np.prod(x2s), 1))
-        x = x.view_as(x2)
+        # x2s = x.data.size()
+        # x = self.linear1(x.view(np.prod(x2s), 1))
+        # x = x.view_as(x2)
         x = x2 - x
         return x
 

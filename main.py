@@ -8,21 +8,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 import gc
+import argparse
+import sys
 from dataloader import BatchLoader
 
 def train(net, b, trainsteps, epoch=-1):
-    if (os.path.isfile("network_E%03d"%epoch) and epoch != -1):
-        print "Loading network..."
-        net = torch.load("network_E%03d"%epoch)
-    elif (os.path.isfile("checkpoint_E%03d"%epoch)):
-        print "Loading checkpoint..."
-        net = torch.load("checkpoint_E%03d"%epoch)
-
     net.train()
 
-    # optimizer = torch.optim.SGD(net.parameters(), lr=10, weight_decay=1e-1)
     optimizer = None
-
+    #
     # fig = plt.figure(1, figsize=[13,6])
     # ax1 = fig.add_subplot(131)
     # ax2 = fig.add_subplot(132)
@@ -34,7 +28,8 @@ def train(net, b, trainsteps, epoch=-1):
     normalize.size_average = True
     losslist = []
     for i in xrange(trainsteps):
-        sample = b[5]
+        index = np.random.randint(0, 5)
+        sample = b[index]
         i2 = sample['032']
         i3 = sample['064']
         gt = sample['ori']
@@ -43,8 +38,9 @@ def train(net, b, trainsteps, epoch=-1):
         i2 = Variable(torch.from_numpy(i2))
         i3 = Variable(torch.from_numpy(i3))
 
-        bstart = 5
-        bstop = bstart + 10
+        offset = 10
+        bstart = np.random.randint(0, i2.data.size()[0] - offset)
+        bstop = bstart + offset
 
         output = net.forward(i2[bstart:bstop].cuda(), i3[bstart:bstop].cuda())
         #=================================================
@@ -52,17 +48,17 @@ def train(net, b, trainsteps, epoch=-1):
         #-----------------------------------------------
         if (optimizer == None):
             optimizer = torch.optim.SGD([{'params': net.convsModules.parameters(),
-                                          'lr': 20, 'momentum':1, 'dampening': 1e-3},
-                                         {'params': net.deconvsModules.parameters(), 'lr': 10},
+                                          'lr': 5, 'momentum':1e-2, 'dampening': 1e-2},
+                                         {'params': net.deconvsModules.parameters(), 'lr': 2},
                                          {'params': net.fcModules.parameters(), 'lr': 1e-3},
                                          {'params': net.bnModules.parameters(), 'lr': 1e-3},
                                          {'params': net.linear1.parameters(),
-                                          'lr': 1e-2, 'momentum':0, 'dampening':1e-5}
+                                          'lr': 1e-1, 'momentum':0, 'dampening':1e-5}
                                          ])
             optimizer.zero_grad()
 
-        loss = criterion((output.squeeze()), (gt[bstart:bstop])) / normalize(i3[bstart:bstop].float().cuda(), gt[bstart:bstop]) - 1
-        print "[Step %03d] Loss: %.05f"%(i, loss.data[0])
+        loss = criterion((output.squeeze()), (gt[bstart:bstop])) / normalize(i3[bstart:bstop].float().cuda(), gt[bstart:bstop])
+        print "[Step %03d] Loss: %.010f  on b[%i]"%(i, loss.data[0], index)
         losslist.append(loss.data[0])
         loss.backward()
 
@@ -127,19 +123,46 @@ def evalNet(net, b, plot=True):
     print "======================= End Eval ======================="
     print "average loss: ", losslist.mean()
 
-def main():
-    b = BatchLoader("/media/storage/Data/CTReconstruction/LCTSC/Output")
+def main(parserargs):
+
+    #=========================
+    # Error check
+    #---------------------
+    assert os.path.isdir(a.input), "Input directory does not exist!"
+    assert a.epoch >= 0, "Epoch must be positive or zero!"
+    if (a.usecuda):
+        assert torch.has_cudnn, "CUDA is not supported on this machine!"
+    if (a.checkpoint):
+        assert os.path.isfile(a.checkpoint + "_E%03d"%(a.epoch + 1)), "Check point file not found!"
+        net = torch.load(a.checkpoint)
+    elif (os.path.isfile("network_E%03d"%(a.epoch + 1))):
+        net = torch.load("network_E%03d"%(a.epoch + 1))
+    else:
+        net = network.Net()
+
+
 
     #=========================
     # Train
     #---------------------
-    net = network.Net()
+    b = BatchLoader(a.input)
+    if a.usecuda:
+        net.cuda()
     net.zero_grad()
-    # net = torch.load("./Backup/Gen4_BatchNormConvolution_GoodForOneImage")
-    net.cuda()
-    l = train(net, b, trainsteps=2500, epoch=0)
-    plt.plot(l)
-    plt.show()
+
+    if (a.train):
+        l = train(net, b, trainsteps=1000, epoch=a.epoch)
+        if a.plot:
+            plt.plot(l)
+            plt.show()
+        else:
+            fig = plt.figure()
+            fig.set_tight_layout(True)
+            ax1 = fig.add_subplot(111)
+            ax1.set_title("Training network Epoch %03d"%(a.epoch + 1))
+            ax1.set_xlabel("Step")
+            ax1.set_ylabel("Loss")
+            plt.savefig(fig, "fig.png")
 
     #==================================
     # Evaluation
@@ -147,10 +170,38 @@ def main():
     # netfile = "network_E003"
     # if (os.path.isfile(netfile)):
     #     net = torch.load(netfile)
-    #     evalNet(net, b, True)
+    #     evalNet(net, b, True)3cfn
+    else:
+        evalNet(net, b, a.plot)
 
     pass
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Training reconstruction from less projections.")
+    parser.add_argument("input", metavar='input', action='store',
+                        help="Train/Target input", type=str)
+    parser.add_argument("-o", metavar='output', dest='output', action='store', type=str, default=None,
+                        help="Set where to store outputs for eval mode")
+    parser.add_argument("-p", dest='plot', action='store_true', default=False,
+                        help="Select whether to disply the plot for stepwise loss")
+    parser.add_argument("-e", "--epoch", dest='epoch', action='store', type=int, default=0,
+                        help="Select network epoch.")
+    parser.add_argument("--load", dest='checkpoint', action='store', default='',
+                        help="Specify network checkpoint.")
+    parser.add_argument("--useCUDA", dest='usecuda', action='store_true',default=False,
+                        help="Set whether to use CUDA or not.")
+    parser.add_argument("--train", dest='train', action='store_true', default=False,
+                        help="Set whether to train or evaluate, default is eval")
+    parser.add_argument("--train-params", dest='trainparams', action='store', type=dir, default=None,
+                        help="Path to a file with dictionary of training parameters written inside")
+    a = parser.parse_args()
+    print a
 
-    main()
+    if (not a.train and not a.output):
+        print "Error!  Must specify output by -o for evaluation mode!"
+        parser.print_help()
+
+
+    main(a)
+
+    # main()
