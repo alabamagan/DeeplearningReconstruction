@@ -1,3 +1,5 @@
+#!/usr/bin/python
+
 # import SimpleITK as sitk
 import network
 import torch
@@ -5,6 +7,7 @@ from torch.autograd import Variable
 import torchvision.utils as utils
 import torch.nn.functional as F
 import numpy as np
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import os
 import gc
@@ -12,15 +15,16 @@ import argparse
 import sys
 from dataloader import BatchLoader
 
-def train(net, b, trainsteps, epoch=-1):
+def train(net, b, trainsteps, epoch=-1, plot=False):
     net.train()
 
     optimizer = None
-    #
-    # fig = plt.figure(1, figsize=[13,6])
-    # ax1 = fig.add_subplot(131)
-    # ax2 = fig.add_subplot(132)
-    # ax3 = fig.add_subplot(133)
+
+    if (plot):
+        fig = plt.figure(1, figsize=[13,6])
+        ax1 = fig.add_subplot(131)
+        ax2 = fig.add_subplot(132)
+        ax3 = fig.add_subplot(133)
 
     criterion = torch.nn.SmoothL1Loss().cuda()
     criterion.size_average = True
@@ -49,11 +53,12 @@ def train(net, b, trainsteps, epoch=-1):
         if (optimizer == None):
             optimizer = torch.optim.SGD([{'params': net.convsModules.parameters(),
                                           'lr': 5, 'momentum':1e-2, 'dampening': 1e-2},
-                                         {'params': net.deconvsModules.parameters(), 'lr': 2},
+                                         {'params': net.deconvsModules.parameters(), 
+                                          'lr': 5, 'momentum':1e-3, 'dampling':1e-2},
                                          {'params': net.fcModules.parameters(), 'lr': 1e-3},
                                          {'params': net.bnModules.parameters(), 'lr': 1e-3},
                                          {'params': net.linear1.parameters(),
-                                          'lr': 1e-1, 'momentum':0, 'dampening':1e-5}
+                                          'lr': 1e-3, 'momentum':0, 'dampening':1e-5}
                                          ])
             optimizer.zero_grad()
 
@@ -68,17 +73,18 @@ def train(net, b, trainsteps, epoch=-1):
         #======================================
         # Plot for visualization of result
         #----------------------------------
-        # for j in xrange(output.data.size(0) - 1):
-        #     ax1.cla()
-        #     ax2.cla()
-        #     ax3.cla()
-        #     ax1.imshow(output.squeeze().cpu().data.numpy()[j], vmin = -1000, vmax=200, cmap="Greys_r")
-        #     ax2.imshow(i3.squeeze().cpu().data.numpy()[bstart + j]
-        #                - output.squeeze().cpu().data.numpy()[j], vmin = -5, vmax = 5, cmap="jet")
-        #     ax3.imshow(i3.squeeze().cpu().data.numpy()[bstart + j],vmin = -1000, vmax=200, cmap="Greys_r")
-        #     plt.ion()
-        #     plt.draw()
-        #     plt.pause(0.01)
+        if (plot):
+            for j in xrange(output.data.size(0) - 1):
+                ax1.cla()
+                ax2.cla()
+                ax3.cla()
+                ax1.imshow(output.squeeze().cpu().data.numpy()[j], vmin = -1000, vmax=200, cmap="Greys_r")
+                ax2.imshow(i3.squeeze().cpu().data.numpy()[bstart + j]
+                           - output.squeeze().cpu().data.numpy()[j], vmin = -5, vmax = 5, cmap="jet")
+                ax3.imshow(i3.squeeze().cpu().data.numpy()[bstart + j],vmin = -1000, vmax=200, cmap="Greys_r")
+                plt.ion()
+                plt.draw()
+                plt.pause(0.01)
 
         if (i % 100 == 0):
             torch.save(net, "checkpoint_E%03d"%(epoch + 1))
@@ -93,76 +99,109 @@ def train(net, b, trainsteps, epoch=-1):
     print "final loss: ", losslist[-1]
 
     torch.save(net, "network_E%03d"%(epoch + 1))
-
-    plt.ioff()
-    fig2 = plt.figure(2)
-    ax1 = fig2.add_subplot(111)
-    ax1.plot(losslist)
-    plt.show()
-
     return losslist
 
-def evalNet(net, b, plot=True):
+def evalNet(net, targets, plot=True):
+    assert isinstance(targets, dict), "Target should be parsed as dictionaries!"
+    assert isinstance(net, network.Net), "Input net is incorrect!"
+    assert targets.has_key('032') and targets.has_key('064'), \
+            "Dictionary must contain data files with key '032' and '064'"
+    
     if (plot):
         fig = plt.figure(1, figsize=[13,6])
-        ax1 = fig.add_subplot(131)
-        ax2 = fig.add_subplot(132)
-        ax3 = fig.add_subplot(133)
+        ax1 = fig.add_subplot(121)
+        ax2 = fig.add_subplot(122)
 
-    net.train(False)
-    criterion = torch.nn.MSELoss().cuda()
-    losslist = []
-    for i in xrange(len(b)):
+    net.eval()
 
+    offset = 5
+    i2 = targets['032']
+    i3 = targets['064']
+    last = i2.shape[0] % offset
+    indexstart = np.arange(0, i2.shape[0], offset)[0:-1]
+    indexstop = indexstart + offset
+    i2 = Variable(torch.from_numpy(i2))
+    i3 = Variable(torch.from_numpy(i3))
+    output = None
 
-        # Free some meory
-        del sample, i2, i3, gt
-        gc.collect()
+    for i in xrange(len(indexstart)):
+        bstart = indexstart[i]
+        bstop = indexstop[i]
 
-    losslist = np.array(losslist)
-    print "======================= End Eval ======================="
-    print "average loss: ", losslist.mean()
+        sl = net.forward(i2[bstart:bstop].cuda(), i3[bstart:bstop].cuda())
+        if output is None:
+            output = sl.data.cpu().numpy()
+        else:
+            output = np.concatenate((output, sl.data.cpu().numpy()), 0)
+
+    if last != 0:
+        if last == 1:
+            bstart = indexstop[-1] - 1
+            bstop = bstart + 2
+        else:
+            bstart = indexstop[-1]
+            bstop = bstart + last
+
+        sl = net.forward(i2[bstart:bstop].cuda(), i3[bstart:bstop].cuda())
+        np.concatenate((output, sl.data.cpu().numpy()[-1].reshape(
+            [1, sl.data.size(1), sl.data.size(2)])), 0)
+
+    if (plot):
+        for i in xrange(output.shape[0]):
+            plt.ion()
+            ax1.imshow(output[i], cmap='Greys_r')
+            ax2.imshow(targets['064'][i], cmap='Greys_r')
+            plt.draw()
+            plt.pause(0.2)
+
+    return output
 
 def main(parserargs):
-
     #=========================
     # Error check
     #---------------------
-    assert os.path.isdir(a.input), "Input directory does not exist!"
     assert a.epoch >= 0, "Epoch must be positive or zero!"
     if (a.usecuda):
         assert torch.has_cudnn, "CUDA is not supported on this machine!"
     if (a.checkpoint):
-        assert os.path.isfile(a.checkpoint + "_E%03d"%(a.epoch + 1)), "Check point file not found!"
+        if (a.checkpoint is None):
+            a.checkpoint = "checkpoint_E%03d"%(a.epoch + 1)
+        assert os.path.isfile(a.checkpoint), "Check point file not found!"
+        print "Loading checkpoint..."
         net = torch.load(a.checkpoint)
-    elif (os.path.isfile("network_E%03d"%(a.epoch + 1))):
-        net = torch.load("network_E%03d"%(a.epoch + 1))
     else:
         net = network.Net()
 
-
+    networkpath = "network_E%03d"%(a.epoch)
+    if (os.path.isfile(networkpath)):
+        print "Find existing network, loading from %s..."%(networkpath)
+        net = torch.load(networkpath)
 
     #=========================
     # Train
     #---------------------
-    b = BatchLoader(a.input)
-    if a.usecuda:
-        net.cuda()
-    net.zero_grad()
-
     if (a.train):
-        l = train(net, b, trainsteps=1000, epoch=a.epoch)
+        assert os.path.isdir(a.input[0]), "Input directory does not exist!"
+        b = BatchLoader(a.input[0])
+        if a.usecuda:
+            net.cuda()
+        net.zero_grad()
+
+        l = train(net, b, trainsteps=1000, epoch=a.epoch, plot=a.plot)
         if a.plot:
             plt.plot(l)
             plt.show()
         else:
+            print "Saving figure..."
+            mpl.use('Agg')
             fig = plt.figure()
             fig.set_tight_layout(True)
             ax1 = fig.add_subplot(111)
             ax1.set_title("Training network Epoch %03d"%(a.epoch + 1))
             ax1.set_xlabel("Step")
             ax1.set_ylabel("Loss")
-            plt.savefig(fig, "fig.png")
+            ax1.plot(l)
+            fig.savefig("fig.png")
 
     #==================================
     # Evaluation
@@ -172,13 +211,22 @@ def main(parserargs):
     #     net = torch.load(netfile)
     #     evalNet(net, b, True)3cfn
     else:
-        evalNet(net, b, a.plot)
+        assert len(a.input) == 2, "Input should follow format [input032] [input064]"
+        assert os.path.isfile(a.input[0]) and os.path.isfile(a.input[1]), \
+                "Inputs does not exist!"
+        assert (a.output), "Output must be specified!"
+        im32 = np.load(a.input[0])
+        im64 = np.load(a.input[1])
+        targets = {'032': im32, '064':im64}
+
+        output = evalNet(net, targets, a.plot)
+        np.save(a.output, output)
 
     pass
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Training reconstruction from less projections.")
-    parser.add_argument("input", metavar='input', action='store',
+    parser.add_argument("input", metavar='input', action='store', nargs="+",
                         help="Train/Target input", type=str)
     parser.add_argument("-o", metavar='output', dest='output', action='store', type=str, default=None,
                         help="Set where to store outputs for eval mode")
@@ -194,12 +242,11 @@ if __name__ == '__main__':
                         help="Set whether to train or evaluate, default is eval")
     parser.add_argument("--train-params", dest='trainparams', action='store', type=dir, default=None,
                         help="Path to a file with dictionary of training parameters written inside")
-    a = parser.parse_args()
-    print a
+    parser.add_argument("--log", dest='log', action='store', type=str, default=None,
+                        help="If specified, all the messages will be written to the specified file.")
 
-    if (not a.train and not a.output):
-        print "Error!  Must specify output by -o for evaluation mode!"
-        parser.print_help()
+    a = parser.parse_args()
+
 
 
     main(a)
