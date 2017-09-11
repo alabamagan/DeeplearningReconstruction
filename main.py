@@ -1,7 +1,6 @@
-#!/usr/bin/python
-
-# import SimpleITK as sitk
-import network
+#!/usr/bin/pyt
+#  import SimpleITK as sitk
+# import network
 import torch
 from torch.autograd import Variable
 import torchvision.utils as utils
@@ -52,9 +51,9 @@ def train(net, b, trainsteps, epoch=-1, plot=False):
         #-----------------------------------------------
         if (optimizer == None):
             optimizer = torch.optim.SGD([{'params': net.convsModules.parameters(),
-                                          'lr': 5, 'momentum':1e-2, 'dampening': 1e-2},
+                                          'lr': 0.5, 'momentum':1e-2, 'dampening': 1e-2},
                                          {'params': net.deconvsModules.parameters(), 
-                                          'lr': 5, 'momentum':1e-3, 'dampling':1e-2},
+                                          'lr': 0.5, 'momentum':1e-3, 'dampling':1e-2},
                                          {'params': net.fcModules.parameters(), 'lr': 1e-3},
                                          {'params': net.bnModules.parameters(), 'lr': 1e-3},
                                          {'params': net.linear1.parameters(),
@@ -215,12 +214,18 @@ def main(parserargs):
         assert os.path.isfile(a.input[0]) and os.path.isfile(a.input[1]), \
                 "Inputs does not exist!"
         assert (a.output), "Output must be specified!"
+
+
         im32 = np.load(a.input[0])
         im64 = np.load(a.input[1])
         targets = {'032': im32, '064':im64}
 
         output = evalNet(net, targets, a.plot)
-        np.save(a.output, output)
+        if (a.output.find('.npy')):
+            np.save(a.output, output)
+        elif (a.output.find('.nii')):
+            from algorithm import NpToNii
+            NpToNii(output, a.output)
 
     pass
 

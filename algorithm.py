@@ -80,6 +80,25 @@ def NiiToNpy(infilename, outfilename):
     np.save(outfilename, im)
     pass
 
+def NpToNii(array, outfilename):
+    """
+
+    :param np.ndarray array:
+    :param str outfilename:
+    :return:
+    """
+
+    assert isinstance(array, np.ndarray), "First argument must be np.ndarray!"
+    assert isinstance(outfilename, str), "Output filename must be a string"
+
+    import SimpleITK as sitk
+    if (not outfilename.find(".nii")):
+        outfilename += ".nii.gz"
+
+    im = sitk.GetImageFromArray(array)
+    sitk.WriteImage(im, outfilename)
+    pass
+
 def ExtractPatchIndexs(im, window, overlap):
     """
     Descriptions
