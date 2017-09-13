@@ -92,7 +92,7 @@ def NpToNii(array, outfilename):
     assert isinstance(outfilename, str), "Output filename must be a string"
 
     import SimpleITK as sitk
-    if (not outfilename.find(".nii")):
+    if not( outfilename.find(".nii") > 0):
         outfilename += ".nii.gz"
 
     im = sitk.GetImageFromArray(array)

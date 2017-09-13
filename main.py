@@ -1,20 +1,35 @@
-#!/usr/bin/pyt
+#!/home/lwong/Toolkits/Anaconda2/bin/python
 #  import SimpleITK as sitk
-# import network
+import network
 import torch
 from torch.autograd import Variable
-import torchvision.utils as utils
-import torch.nn.functional as F
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import os
 import gc
+import logging
 import argparse
-import sys
 from dataloader import BatchLoader
 
-def train(net, b, trainsteps, epoch=-1, plot=False):
+#============================================
+# Prepare global logger
+logging.getLogger(__name__).setLevel(10)
+
+def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
+    """
+    Descriptions
+    ------------
+      Train the network.
+
+    :param network.Net  net:        Network to be trained
+    :param BatchLoader  b:          Batch loader for loading training data
+    :param int          trainsteps: Number steps per epoch
+    :param int          epoch:      Number of epoch
+    :param bool         plot:       Set true to show plot, require X-server screen resources
+    :param dict         params:     Not supported yet
+    :return:
+    """
     net.train()
 
     optimizer = None
@@ -51,9 +66,9 @@ def train(net, b, trainsteps, epoch=-1, plot=False):
         #-----------------------------------------------
         if (optimizer == None):
             optimizer = torch.optim.SGD([{'params': net.convsModules.parameters(),
-                                          'lr': 0.5, 'momentum':1e-2, 'dampening': 1e-2},
+                                          'lr': 0.02, 'momentum':1e-2, 'dampening': 1e-2},
                                          {'params': net.deconvsModules.parameters(), 
-                                          'lr': 0.5, 'momentum':1e-3, 'dampling':1e-2},
+                                          'lr': 0.02, 'momentum':1e-3, 'dampling':1e-2},
                                          {'params': net.fcModules.parameters(), 'lr': 1e-3},
                                          {'params': net.bnModules.parameters(), 'lr': 1e-3},
                                          {'params': net.linear1.parameters(),
@@ -63,6 +78,7 @@ def train(net, b, trainsteps, epoch=-1, plot=False):
 
         loss = criterion((output.squeeze()), (gt[bstart:bstop])) / normalize(i3[bstart:bstop].float().cuda(), gt[bstart:bstop])
         print "[Step %03d] Loss: %.010f  on b[%i]"%(i, loss.data[0], index)
+        logging.getLogger(__name__).log(20, "[Step %03d] Loss: %.010f  on b[%i]"%(i, loss.data[0], index))
         losslist.append(loss.data[0])
         loss.backward()
 
@@ -156,6 +172,8 @@ def evalNet(net, targets, plot=True):
     return output
 
 def main(parserargs):
+    logging.getLogger(__name__).log(20, "Start running batch with options: %s"%parserargs)
+
     #=========================
     # Error check
     #---------------------
@@ -167,6 +185,7 @@ def main(parserargs):
             a.checkpoint = "checkpoint_E%03d"%(a.epoch + 1)
         assert os.path.isfile(a.checkpoint), "Check point file not found!"
         print "Loading checkpoint..."
+        logging.getLogger(__name__).log(20, "Loading checkpoint...")
         net = torch.load(a.checkpoint)
     else:
         net = network.Net()
@@ -174,24 +193,28 @@ def main(parserargs):
     networkpath = "network_E%03d"%(a.epoch)
     if (os.path.isfile(networkpath)):
         print "Find existing network, loading from %s..."%(networkpath)
+        logging.getLogger(__name__).log(20, "Find existing network, loading from %s..."%(networkpath))
         net = torch.load(networkpath)
 
     #=========================
     # Train
     #---------------------
     if (a.train):
+        logging.getLogger(__name__).log(20, "Start training network with %d substeps..."%a.steps)
         assert os.path.isdir(a.input[0]), "Input directory does not exist!"
         b = BatchLoader(a.input[0])
         if a.usecuda:
+            logging.getLogger(__name__).log(20, "Using CUDA")
             net.cuda()
         net.zero_grad()
 
-        l = train(net, b, trainsteps=1000, epoch=a.epoch, plot=a.plot)
+        l = train(net, b, trainsteps=a.steps, epoch=a.epoch, plot=a.plot)
         if a.plot:
             plt.plot(l)
             plt.show()
         else:
             print "Saving figure..."
+            logging.getLogger(__name__).log(10, "Saving figure...")
             mpl.use('Agg')
             fig = plt.figure()
             fig.set_tight_layout(True)
@@ -200,7 +223,7 @@ def main(parserargs):
             ax1.set_xlabel("Step")
             ax1.set_ylabel("Loss")
             ax1.plot(l)
-            fig.savefig("fig.png")
+            fig.savefig("fig_E%03d.png"%(a.epoch))
 
     #==================================
     # Evaluation
@@ -214,16 +237,16 @@ def main(parserargs):
         assert os.path.isfile(a.input[0]) and os.path.isfile(a.input[1]), \
                 "Inputs does not exist!"
         assert (a.output), "Output must be specified!"
-
+        logging.getLogger(__name__).log(10, "Start evaluation...")
 
         im32 = np.load(a.input[0])
         im64 = np.load(a.input[1])
         targets = {'032': im32, '064':im64}
 
         output = evalNet(net, targets, a.plot)
-        if (a.output.find('.npy')):
+        if (a.output.find('.npy') > 0):
             np.save(a.output, output)
-        elif (a.output.find('.nii')):
+        elif (a.output.find('.nii')) > 0:
             from algorithm import NpToNii
             NpToNii(output, a.output)
 
@@ -239,6 +262,8 @@ if __name__ == '__main__':
                         help="Select whether to disply the plot for stepwise loss")
     parser.add_argument("-e", "--epoch", dest='epoch', action='store', type=int, default=0,
                         help="Select network epoch.")
+    parser.add_argument("-s", "--steps", dest='steps', action='store', type=int, default=1000,
+                        help="Specify how many steps to run per epoch.")
     parser.add_argument("--load", dest='checkpoint', action='store', default='',
                         help="Specify network checkpoint.")
     parser.add_argument("--useCUDA", dest='usecuda', action='store_true',default=False,
@@ -249,10 +274,13 @@ if __name__ == '__main__':
                         help="Path to a file with dictionary of training parameters written inside")
     parser.add_argument("--log", dest='log', action='store', type=str, default=None,
                         help="If specified, all the messages will be written to the specified file.")
-
     a = parser.parse_args()
 
-
+    if (a.log is None):
+        if (not os.path.isdir("./Backup/Log")):
+            os.mkdir("./Backup/Log")
+        a.log = "./Backup/Log/run%03d.log"%(a.epoch)
+    logging.basicConfig(format="[%(asctime)-12s - $(levelname)s] %(message)s", filename=a.log)
 
     main(a)
 
