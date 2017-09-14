@@ -1,5 +1,6 @@
 
 import numpy as np
+import gc
 
 def SliceImage(im, dim):
     """
@@ -78,6 +79,10 @@ def NiiToNpy(infilename, outfilename):
 
     im = sitk.GetArrayFromImage(sitk.ReadImage(infilename))
     np.save(outfilename, im)
+    print "Saving ", outfilename
+
+    del im
+    gc.collect()
     pass
 
 def NpToNii(array, outfilename):
@@ -97,6 +102,10 @@ def NpToNii(array, outfilename):
 
     im = sitk.GetImageFromArray(array)
     sitk.WriteImage(im, outfilename)
+
+    print "Saving ", outfilename
+    del im, array
+    gc.collect()
     pass
 
 def ExtractPatchIndexs(im, window, overlap):
@@ -141,12 +150,40 @@ def ExtractPatchIndexs(im, window, overlap):
         patches.append(arr.transpose())
     return patches
 
+def ConvertAllNpyToNii(directory):
+    import multiprocessing as mp
+    import os
+
+    assert os.path.isdir(directory), "No such directory"
+    if not os.path.isdir(directory + "/output"):
+        os.makedirs(directory + "/output")
+
+    ps = []
+    pool = mp.Pool(processes=8)
+    fs = os.listdir(directory)
+    for fn in fs:
+        if (fn.find('.npy') != -1):
+            tar = directory + "/" + fn
+            dst = directory + "/output/" + fn.replace('.npy', '.nii.gz')
+            print "Working on ", tar
+            p = pool.apply_async(NpToNii, args=[np.load(tar), dst])
+            ps.append(p)
+
+    for p in ps:
+        p.wait()
+        del p
+
+
 def test():
-    dim = [1, 512, 512]
-    windows = [1, 32, 512]
-    overlap = [0, 8, 8]
-    print ExtractPatchIndexs(dim, window=windows, overlap=overlap)
+    import matplotlib as mpl
+    mpl.use('Agg')
+    import matplotlib.pyplot as plt
+
+    fig = plt.figure()
+    ax1 = fig.add_subplot(111)
+    ax1.plot(np.arange(100))
+    fig.savefig('foo.png')
 
 if __name__ == '__main__':
+    # ConvertAllNpyToNii("./Output2/")
     test()
-
