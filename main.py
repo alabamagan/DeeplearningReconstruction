@@ -1,11 +1,12 @@
 #!/home/lwong/Toolkits/Anaconda2/bin/python
 #  import SimpleITK as sitk
+import matplotlib as mpl
 import network
 import torch
 from torch.autograd import Variable
-import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+import numpy as np
 import os
 import gc
 import logging
@@ -46,7 +47,7 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
     normalize.size_average = True
     losslist = []
     for i in xrange(trainsteps):
-        index = np.random.randint(0, 5)
+        index = np.random.randint(0, 8)
         sample = b[index]
         i2 = sample['032']
         i3 = sample['064']
@@ -66,19 +67,19 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
         #-----------------------------------------------
         if (optimizer == None):
             optimizer = torch.optim.SGD([{'params': net.convsModules.parameters(),
-                                          'lr': 0.02, 'momentum':1e-2, 'dampening': 1e-2},
+                                          'lr': 25, 'momentum':1e-2, 'dampening': 1e-2},
                                          {'params': net.deconvsModules.parameters(), 
-                                          'lr': 0.02, 'momentum':1e-3, 'dampling':1e-2},
+                                          'lr': 25, 'momentum':1e-3, 'dampling':1e-2},
                                          {'params': net.fcModules.parameters(), 'lr': 1e-3},
                                          {'params': net.bnModules.parameters(), 'lr': 1e-3},
                                          {'params': net.linear1.parameters(),
-                                          'lr': 1e-3, 'momentum':0, 'dampening':1e-5}
+                                          'lr': 0, 'momentum':0, 'dampening':1e-5}
                                          ])
             optimizer.zero_grad()
 
         loss = criterion((output.squeeze()), (gt[bstart:bstop])) / normalize(i3[bstart:bstop].float().cuda(), gt[bstart:bstop])
-        print "[Step %03d] Loss: %.010f  on b[%i]"%(i, loss.data[0], index)
-        logging.getLogger(__name__).log(20, "[Step %03d] Loss: %.010f  on b[%i]"%(i, loss.data[0], index))
+        print "[Step %04d] Loss: %.010f  on b[%i]"%(i, loss.data[0], index)
+        logging.getLogger(__name__).log(20, "[Step %04d] Loss: %.010f  on b[%i]"%(i, loss.data[0], index))
         losslist.append(loss.data[0])
         loss.backward()
 
@@ -93,10 +94,10 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
                 ax1.cla()
                 ax2.cla()
                 ax3.cla()
-                ax1.imshow(output.squeeze().cpu().data.numpy()[j], vmin = -1000, vmax=200, cmap="Greys_r")
+                ax1.imshow(output.squeeze().cpu().data.numpy()[j], vmin =-1000, vmax=100, cmap="Greys_r")
                 ax2.imshow(i3.squeeze().cpu().data.numpy()[bstart + j]
                            - output.squeeze().cpu().data.numpy()[j], vmin = -5, vmax = 5, cmap="jet")
-                ax3.imshow(i3.squeeze().cpu().data.numpy()[bstart + j],vmin = -1000, vmax=200, cmap="Greys_r")
+                ax3.imshow(i3.squeeze().cpu().data.numpy()[bstart + j],vmin = -1000, vmax=100, cmap="Greys_r")
                 plt.ion()
                 plt.draw()
                 plt.pause(0.01)
@@ -112,7 +113,8 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
     print "======================= End train epoch %03d ======================="%(epoch + 1)
     print "average loss: ", losslist.mean()
     print "final loss: ", losslist[-1]
-
+    logging.getLogger(__name__).log(20,"======================= End train epoch %03d ======================="%(epoch + 1))
+    logging.getLogger(__name__).log(20,"Average loss: %.05f"%losslist.mean())
     torch.save(net, "network_E%03d"%(epoch + 1))
     return losslist
 
@@ -133,12 +135,14 @@ def evalNet(net, targets, plot=True):
     i2 = targets['032']
     i3 = targets['064']
     last = i2.shape[0] % offset
-    indexstart = np.arange(0, i2.shape[0], offset)[0:-1]
+    if last == 0:
+        indexstart = np.arange(0, i2.shape[0], offset)
+    else:
+        indexstart = np.arange(0, i2.shape[0], offset)[0:-1]
     indexstop = indexstart + offset
     i2 = Variable(torch.from_numpy(i2))
     i3 = Variable(torch.from_numpy(i3))
     output = None
-
     for i in xrange(len(indexstart)):
         bstart = indexstart[i]
         bstop = indexstop[i]
@@ -153,13 +157,22 @@ def evalNet(net, targets, plot=True):
         if last == 1:
             bstart = indexstop[-1] - 1
             bstop = bstart + 2
+            sl = net.forward(i2[bstart:bstop].cuda(), i3[bstart:bstop].cuda())
+            output =np.concatenate((output, sl.data.cpu().numpy()[-1].reshape(
+                                [1, sl.data.size(1), sl.data.size(2)])), 0)
+
         else:
             bstart = indexstop[-1]
             bstop = bstart + last
+            sl = net.forward(i2[bstart:bstop].cuda(), i3[bstart:bstop].cuda())
+            output =np.concatenate((output, sl.data.cpu().numpy()), 0)
 
-        sl = net.forward(i2[bstart:bstop].cuda(), i3[bstart:bstop].cuda())
-        np.concatenate((output, sl.data.cpu().numpy()[-1].reshape(
-            [1, sl.data.size(1), sl.data.size(2)])), 0)
+    # Calculate loss with np if ori exist
+    loss = None
+    if (targets.has_key('ori')):
+        loss =  np.sum(np.abs(targets['ori'] - output)) / \
+                np.sum(np.abs(targets['ori'] - targets['064']))
+        logging.getLogger(__name__).log(20, "Calculated loss: %.05f"%loss)
 
     if (plot):
         for i in xrange(output.shape[0]):
@@ -169,7 +182,7 @@ def evalNet(net, targets, plot=True):
             plt.draw()
             plt.pause(0.2)
 
-    return output
+    return output, loss
 
 def main(parserargs):
     logging.getLogger(__name__).log(20, "Start running batch with options: %s"%parserargs)
@@ -215,7 +228,7 @@ def main(parserargs):
         else:
             print "Saving figure..."
             logging.getLogger(__name__).log(10, "Saving figure...")
-            mpl.use('Agg')
+            plt.switch_backend('Agg')
             fig = plt.figure()
             fig.set_tight_layout(True)
             ax1 = fig.add_subplot(111)
@@ -233,22 +246,68 @@ def main(parserargs):
     #     net = torch.load(netfile)
     #     evalNet(net, b, True)3cfn
     else:
-        assert len(a.input) == 2, "Input should follow format [input032] [input064]"
-        assert os.path.isfile(a.input[0]) and os.path.isfile(a.input[1]), \
-                "Inputs does not exist!"
-        assert (a.output), "Output must be specified!"
-        logging.getLogger(__name__).log(10, "Start evaluation...")
+        if len(a.input) == 1:
+            import fnmatch
 
-        im32 = np.load(a.input[0])
-        im64 = np.load(a.input[1])
-        targets = {'032': im32, '064':im64}
+            assert os.path.isdir(a.input[0]), "Input directory does not exist!"
+            logging.getLogger(__name__).log(10, "Start evaluation on directory %s"%a.input[0])
 
-        output = evalNet(net, targets, a.plot)
-        if (a.output.find('.npy') > 0):
-            np.save(a.output, output)
-        elif (a.output.find('.nii')) > 0:
-            from algorithm import NpToNii
-            NpToNii(output, a.output)
+            # Default output path
+            if (a.output is None):
+                outdir = "%.05f"%np.random.rand()
+            else:
+                outdir = a.output
+
+            if not (os.path.isdir(outdir)):
+                outdir = a.input[0] + "/Generated/"
+
+            if not os.path.isdir(outdir):
+                os.makedirs(outdir)
+
+            fs = os.listdir(a.input[0])
+            fs = fnmatch.filter(fs, "*.npy")
+            fs = [fn.split('_')[0] for fn in fs]
+            fs = set(fs)
+
+            losslist = []
+            for fn in fs:
+                print "Working on ", fn
+                logging.getLogger(__name__).log(20, "Working on %s"%fn)
+                im64 = np.load(a.input[0] + "/" + fn + "_064.npy")
+                im32 = np.load(a.input[0] + "/" + fn + "_032.npy")
+                imori = np.load(a.input[0] + "/" + fn + "_ori.npy")
+                targets = {'032': im32, '064':im64, 'ori': imori}
+
+                output, loss = evalNet(net, targets, a.plot)
+
+                from algorithm import NpToNii
+                NpToNii(output, outdir + fn + "_processed.nii.gz")
+                logging.getLogger(__name__).log(10, "Saving to " + outdir + fn + "_processed.nii.gz")
+                losslist.append(loss)
+
+            logging.getLogger(__name__).log(20, "=============== Eval E%03d End==============="%(a.epoch + 1))
+            logging.getLogger(__name__).log(20, "Average loss: %.05f"%(np.mean(losslist)))
+
+
+        elif len(a.input) == 2:
+            assert os.path.isfile(a.input[0]) and os.path.isfile(a.input[1]), \
+                    "Inputs does not exist!"
+            assert (a.output), "Output must be specified!"
+            logging.getLogger(__name__).log(10, "Start evaluation on one target...")
+
+            im32 = np.load(a.input[0])
+            im64 = np.load(a.input[1])
+            targets = {'032': im32, '064':im64}
+
+            output = evalNet(net, targets, a.plot)[0]
+            if (a.output.find('.npy') > 0):
+                np.save(a.output, output)
+            elif (a.output.find('.nii')) > 0:
+                from algorithm import NpToNii
+                NpToNii(output, a.output)
+
+        else:
+            print "Wrong number of arguments!"
 
     pass
 
@@ -279,8 +338,12 @@ if __name__ == '__main__':
     if (a.log is None):
         if (not os.path.isdir("./Backup/Log")):
             os.mkdir("./Backup/Log")
-        a.log = "./Backup/Log/run%03d.log"%(a.epoch)
-    logging.basicConfig(format="[%(asctime)-12s - $(levelname)s] %(message)s", filename=a.log)
+        if (a.train):
+            a.log = "./Backup/Log/run%03d.log"%(a.epoch)
+        else:
+            a.log = "./Backup/Log/eval_%03d.log"%(a.epoch)
+
+    logging.basicConfig(format="[%(asctime)-12s - %(levelname)s] %(message)s", filename=a.log)
 
     main(a)
 

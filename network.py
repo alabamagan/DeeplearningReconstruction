@@ -134,6 +134,7 @@ class Net(nn.Module):
 
         x = self.col2im(V)
 
+        ## Bad performance
         # x2s = x.data.size()
         # x = self.linear1(x.view(np.prod(x2s), 1))
         # x = x.view_as(x2)
