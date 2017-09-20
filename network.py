@@ -17,6 +17,8 @@ class Net(nn.Module):
 
         self.kernelsize1 = 11
         self.kernelsize2 = 5
+        self.channelsize1 = 12
+        self.channelsize2 = 35
 
         self.linear1 = nn.Linear(1, 1)
 
@@ -48,6 +50,9 @@ class Net(nn.Module):
         inshape = x1.data.size()
 
         x = x2 - x1
+
+        self.bnModules['init'] = torch.nn.BatchNorm2d(1)
+        x = torch.nn.BatchNorm2d(1).cuda()(x.unsqueeze(1)).squeeze()
         # x = self.linear1(x.view(np.prod(x.data.size()), 1))
         # print x.data.size()
         # x = x.view_as(x2)
@@ -66,20 +71,24 @@ class Net(nn.Module):
                     l_fc1 = self.fcModules[0, i, j]
                     l_fc2 = self.fcModules[1, i, j]
                     l_fc3 = self.fcModules[2, i, j]
+                    # l_fc4 = self.fcModules[3, i, j]
                     l_bn1 = self.bnModules[0, i, j]
                     l_bn2 = self.bnModules[1, i, j]
+                    # l_bn3 = self.bnModules[3, i, j]
                     l_deconv1 = self.deconvsModules[0, i, j]
                     l_deconv2 = self.deconvsModules[1, i, j]
                 except KeyError:
-                    l_conv1 = nn.Conv2d(1, 24, kernel_size=self.kernelsize1)
-                    l_conv2 = nn.Conv2d(24, 60, kernel_size=self.kernelsize2)
+                    l_conv1 = nn.Conv2d(1, self.channelsize1, kernel_size=self.kernelsize1)
+                    l_conv2 = nn.Conv2d(self.channelsize1, self.channelsize2, kernel_size=self.kernelsize2)
                     l_fc1 = nn.ELU()
                     l_fc2 = nn.ELU()
                     l_fc3 = nn.ELU()
-                    l_bn1 = nn.BatchNorm2d(24)
-                    l_bn2 = nn.BatchNorm2d(60)
-                    l_deconv1 = nn.ConvTranspose2d(24, 1, kernel_size=self.kernelsize1)
-                    l_deconv2 = nn.ConvTranspose2d(60, 24, kernel_size=self.kernelsize2)
+                    # l_fc4 = nn.ELU()
+                    l_bn1 = nn.BatchNorm2d(self.channelsize1)
+                    l_bn2 = nn.BatchNorm2d(self.channelsize2)
+                    # l_bn3 = nn.BatchNorm2d(24)
+                    l_deconv1 = nn.ConvTranspose2d(self.channelsize1, 1, kernel_size=self.kernelsize1)
+                    l_deconv2 = nn.ConvTranspose2d(self.channelsize2, self.channelsize1, kernel_size=self.kernelsize2)
                     l_conv1.train()
                     if (x1.is_cuda):
                         l_conv1.cuda()
@@ -87,8 +96,10 @@ class Net(nn.Module):
                         l_fc1.cuda()
                         l_fc2.cuda()
                         l_fc3.cuda()
+                        # l_fc4.cuda()
                         l_bn1.cuda()
                         l_bn2.cuda()
+                        # l_bn3.cuda()
                         l_deconv1.cuda()
                         l_deconv2.cuda()
                     self.convsModules[0, i, j] = l_conv1
@@ -96,8 +107,10 @@ class Net(nn.Module):
                     self.fcModules[0, i, j] = l_fc1
                     self.fcModules[1, i, j] = l_fc2
                     self.fcModules[2, i, j] = l_fc3
+                    # self.fcModules[3, i, j] = l_fc4
                     self.bnModules[0, i, j] = l_bn1
                     self.bnModules[1, i, j] = l_bn2
+                    # self.bnModules[2, i, j] = l_bn3
                     self.deconvsModules[0, i, j] = l_deconv1
                     self.deconvsModules[1, i, j] = l_deconv2
 
@@ -115,9 +128,11 @@ class Net(nn.Module):
                     l_x = l_fc2(l_x)
 
                     l_x = l_deconv2(l_x)
+                    # l_x = l_bn3(l_x)
                     l_x = l_fc3(l_x)
 
                     l_x = l_deconv1(l_x).squeeze()
+                    # l_x = l_fc4(l_x)
                 else:
                     l_x = l_x.squeeze()
 
