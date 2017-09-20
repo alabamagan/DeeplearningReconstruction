@@ -150,7 +150,7 @@ def ExtractPatchIndexs(im, window, overlap):
         patches.append(arr.transpose())
     return patches
 
-def ConvertAllNpyToNii(directory):
+def ConvertAllNpyToNii(directory, output = 'output'):
     import multiprocessing as mp
     import os
 
@@ -164,7 +164,7 @@ def ConvertAllNpyToNii(directory):
     for fn in fs:
         if (fn.find('.npy') != -1):
             tar = directory + "/" + fn
-            dst = directory + "/output/" + fn.replace('.npy', '.nii.gz')
+            dst = directory + "/" + output + "/" + fn.replace('.npy', '.nii.gz')
             print "Working on ", tar
             p = pool.apply_async(NpToNii, args=[np.load(tar), dst])
             ps.append(p)
