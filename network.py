@@ -15,10 +15,10 @@ class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
 
-        self.kernelsize1 = 11
+        self.kernelsize1 = 15
         self.kernelsize2 = 5
         self.channelsize1 = 12
-        self.channelsize2 = 35
+        self.channelsize2 = 24
 
         self.linear1 = nn.Linear(1, 1)
 

@@ -17,6 +17,10 @@ from dataloader import BatchLoader
 # Prepare global logger
 logging.getLogger(__name__).setLevel(10)
 
+def LogPrint(msg, level=20):
+    logging.getLogger(__name__).log(level, msg)
+    print msg
+
 def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
     """
     Descriptions
@@ -46,9 +50,14 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
     normalize = torch.nn.SmoothL1Loss().cuda()
     normalize.size_average = True
     losslist = []
+
+
+    #============================================
+    # Actual train phase
+    #-------------------------------------
     for i in xrange(trainsteps):
         # index = np.random.randint(0, len(b))
-        sample = b(30)
+        sample = b(25)
         i2 = sample['032']
         i3 = sample['064']
         gt = sample['ori']
@@ -69,16 +78,34 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
                                           'lr': 50.2, 'momentum':1e-2, 'dampening': 1e-2},
                                          {'params': net.deconvsModules.parameters(), 
                                           'lr': 50.2, 'momentum':1e-3, 'dampling':1e-2},
-                                         {'params': net.fcModules.parameters(), 'lr': 0},
-                                         {'params': net.bnModules.parameters(), 'lr': 10},
+                                         {'params': net.fcModules.parameters(), 'lr': 2},
+                                         {'params': net.bnModules.parameters(), 'lr': 2},
                                          {'params': net.linear1.parameters(),
-                                          'lr': 0, 'momentum':0, 'dampening':1e-5}
+                                          'lr': 1, 'momentum':0, 'dampening':1e-5}
                                          ])
             optimizer.zero_grad()
         else:
            # Decay learning rate
            for pg in optimizer.param_groups:
                pg['lr'] = pg['lr'] * np.exp(-i * 1. / float(trainsteps))
+
+        #============================================
+        # Pre-train phase
+        #-------------------------------------
+        if (i == 0 and epoch == 0):
+            if (os.path.isfile("pretrain_checkpoint_E%03d"%(epoch + 1))):
+                net.load_state_dict(torch.load("pretrain_checkpoint_E%03d"%(epoch + 1)))
+                LogPrint("Loading pretrain dict")
+            else:
+                LogPrint(">>>>>>>>>>>>>>> Pre-train Phase <<<<<<<<<<<<<<<<<")
+                for j in xrange(500):
+                    loss = criterion((output.squeeze()), (gt)) / normalize(i3.float().cuda(), gt)
+                    loss.backward()
+                    optimizer.step()
+                    output = net.forward(i2.cuda(), i3.cuda())
+                    LogPrint("[Pretrain %04d] Loss: %.010f"%(j, loss.data[0]))
+                LogPrint(">>>>>>>>>>>>>>> Pre-train Phase End <<<<<<<<<<<<<<<<<")
+                torch.save(net.state_dict(), "pretrain_checkpoint_E%03d"%(epoch + 1))
 
         loss = criterion((output.squeeze()), (gt)) / normalize(i3.float().cuda(), gt)
         print "[Step %04d] Loss: %.010f"%(i, loss.data[0])
@@ -99,9 +126,9 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
                 ax3.cla()
                 ax1.imshow(output.squeeze().cpu().data.numpy()[j], vmin =-1000, vmax=100, cmap="Greys_r")
                 ax2.imshow(i3.squeeze().cpu().data.numpy()[j]
-                           - output.squeeze().cpu().data.numpy()[j], vmin = -150, vmax = 150, cmap="jet")
-                ax3.imshow(i3.squeeze().cpu().data.numpy()[j]
-                           - i2.squeeze().cpu().data.numpy()[j],vmin = -150, vmax=150, cmap="Greys_r")
+                           - output.squeeze().cpu().data.numpy()[j], vmin = -15, vmax = 15, cmap="jet")
+                ax3.imshow(gt.squeeze().cpu().data.numpy()[j] -
+                           i3.squeeze().cpu().data.numpy()[j],vmin = -15, vmax=15, cmap="Greys_r")
                 plt.ion()
                 plt.draw()
                 plt.pause(0.01)
