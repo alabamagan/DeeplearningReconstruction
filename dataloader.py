@@ -20,38 +20,21 @@ class BatchLoader(Dataset):
         if (not self.train):
             out = {}
             sample = self.unique_sample_prefix[idx]
-            for suffix in self.recon_projection_numbers:
-                filename = self.root_dir + "/" + sample + "_" + suffix + ".npy"
-                im = np.load(filename)
-
-                if (idy is None):
-                    out[suffix] = im
-                else:
-                    out[suffix] = im[idy]
-        else:
-            # Random slice order for training mode
-            assert idy != None, "Second index must be provided in training mode"
-
-            out = {}
-            sample = self.unique_sample_prefix[idx]
-            # Obtain number of files
             fs = os.listdir(self.root_dir)
-            fs = fnmatch.filter(fs, sample + "*")
-            s = len(fs) / len(self.recon_projection_numbers)
-            # Randomly select indexes
-
-            assert idy < s, "Requested to much slices!"
-            l =random.sample(range(s), idy)
             for suffix in self.recon_projection_numbers:
-                filenames = [self.root_dir + "/" + sample + "_"
-                             + suffix + "_S%03d.npy"%slicenum
-                            for slicenum in l]
-                im = [np.load(fn) for fn in filenames]
-                im = [subim.reshape([1, subim.shape[0], subim.shape[1]]) for subim in im]
-                im = np.concatenate(im, 0)
+                fs = fnmatch.filter(fs, sample + "_" + suffix + "*")
+                slicenum = len(fs)
 
-                out[suffix] = im
-
+                filename = [self.root_dir + "/" + sample + "_" + suffix + "_S%03d.npy"%i for i in xrange(slicenum)]
+                if (idy is None):
+                    # Return whole image
+                    images = [np.load(f) for f in filename]
+                    images = [im.reshape(1, im.shape[0], im.shape[1]) for im in images]
+                    out[suffix] = np.concatenate(images, 0)
+                else:
+                    out[suffix] = np.load(filename[idy])
+        else:
+            raise AssertionError("Get item overload is not available in non-train mode.")
 
         return out
         

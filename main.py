@@ -306,6 +306,8 @@ def main(parserargs):
             assert os.path.isdir(a.input[0]), "Input directory does not exist!"
             logging.getLogger(__name__).log(10, "Start evaluation on directory %s"%a.input[0])
 
+            b = BatchLoader(a.input)
+
             # Default output path
             if (a.output is None):
                 outdir = "%.05f"%np.random.rand()
@@ -318,24 +320,36 @@ def main(parserargs):
             if not os.path.isdir(outdir):
                 os.makedirs(outdir)
 
-            ff = os.listdir(a.input[0])
-            fs = fnmatch.filter(ff, "*.npy")
-            fs = [fn.split('_')[0] for fn in fs]
-            fs = set(fs)
-
             losslist = []
-            for fn in fs:
-                print "Working on ", fn
+            for i in xrange(len(b)):
                 batchsize  = 30
-                numOfSlices = len(fnmatch.filter(ff, fn + "*_ori.npy"))
-                s
-                logging.getLogger(__name__).log(20, "Working on %s"%fn)
-                im64 = np.load(a.input[0] + "/" + fn + "_128.npy")
-                im32 = np.load(a.input[0] + "/" + fn + "_064.npy")
-                imori = np.load(a.input[0] + "/" + fn + "_ori.npy")
-                targets = {'032': im32, '064':im64, 'ori': imori}
 
-                output, loss = evalNet(net, targets, a.plot)
+                images = b[i]
+                imShape = images['ori'].shape
+                numOfSlice = imShape[0]
+
+                if numOfSlice % batchsize == 0:
+                    bstart = np.arange(0, numOfSlice, batchsize)
+                    bstop = bstart + batchsize
+                else:
+                    bstart = np.arange(0, numOfSlice, batchsize)
+                    bstop = bstart + batchsize
+                    bstop[-1] = numOfSlice
+
+                #
+                # im64 = np.load(images['128'])
+                # im32 = np.load(a.input[0] + "/" + fn + "_064.npy")
+                # imori = np.load(a.input[0] + "/" + fn + "_ori.npy")
+                # targets = {'032': im32, '064':im64, 'ori': imori}
+                #
+                # output, loss = evalNet(net, targets, a.plot)
+                for j in xrange(len(bstart)):
+                    start = bstart[j]
+                    stop = bstop[j]
+                    im128 = images['128'][start:stop]
+                    im64 = images['064'][start:stop]
+                    output, loss =
+
 
                 from algorithm import NpToNii
                 NpToNii(output, outdir + fn + "_processed.nii.gz")
