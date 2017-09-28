@@ -58,8 +58,8 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
     for i in xrange(trainsteps):
         # index = np.random.randint(0, len(b))
         sample = b(25)
-        i2 = sample['032']
-        i3 = sample['064']
+        i2 = sample['064']
+        i3 = sample['128']
         gt = sample['ori']
         gt = Variable(torch.from_numpy(gt)).float().cuda()
         i2 = Variable(torch.from_numpy(i2))
@@ -74,25 +74,40 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
         # Add modules params to optimizer
         #-----------------------------------------------
         if (optimizer == None):
+            # Default params
+            convLR = 10
+            fcLR = 2
+            bnLR = 2
+            linearLR = 1
+            if params != None:
+                if params.has_key('convLR'):
+                    convLR = params['convLR']
+                if params.has_key('fcLR'):
+                    fcLR = params['fcLR']
+                if params.has_key('bnLR'):
+                    bnLR = params['bnLR']
+                if params.has_key('linearLR'):
+                    linearLR = params['linearLR']
+
             optimizer = torch.optim.SGD([{'params': net.convsModules.parameters(),
-                                          'lr': 50.2, 'momentum':1e-2, 'dampening': 1e-2},
+                                          'lr': convLR, 'momentum':1e-2, 'dampening': 1e-2},
                                          {'params': net.deconvsModules.parameters(), 
-                                          'lr': 50.2, 'momentum':1e-3, 'dampling':1e-2},
-                                         {'params': net.fcModules.parameters(), 'lr': 2},
-                                         {'params': net.bnModules.parameters(), 'lr': 2},
+                                          'lr': convLR, 'momentum':1e-3, 'dampling':1e-2},
+                                         {'params': net.fcModules.parameters(), 'lr': fcLR},
+                                         {'params': net.bnModules.parameters(), 'lr': bnLR},
                                          {'params': net.linear1.parameters(),
-                                          'lr': 1, 'momentum':0, 'dampening':1e-5}
+                                          'lr': linearLR, 'momentum':0, 'dampening':1e-5}
                                          ])
             optimizer.zero_grad()
         else:
            # Decay learning rate
            for pg in optimizer.param_groups:
-               pg['lr'] = pg['lr'] * np.exp(-i * 1. / float(trainsteps))
+               pg['lr'] = pg['lr'] * np.exp(-i * float(a.epoch)  / float(trainsteps))
 
         #============================================
         # Pre-train phase
         #-------------------------------------
-        if (i == 0 and epoch == 0):
+        if (i == 0 and epoch == 0 and a.pretrain):
             if (os.path.isfile("pretrain_checkpoint_E%03d"%(epoch + 1))):
                 net.load_state_dict(torch.load("pretrain_checkpoint_E%03d"%(epoch + 1)))
                 LogPrint("Loading pretrain dict")
@@ -163,8 +178,8 @@ def evalNet(net, targets, plot=True):
     net.eval()
 
     offset = 5
-    i2 = targets['032']
-    i3 = targets['064']
+    i2 = targets['064']
+    i3 = targets['128']
     last = i2.shape[0] % offset
     if last == 0:
         indexstart = np.arange(0, i2.shape[0], offset)
@@ -252,7 +267,15 @@ def main(parserargs):
             net.cuda()
         net.zero_grad()
 
-        l = train(net, b, trainsteps=a.steps, epoch=a.epoch, plot=a.plot)
+        # Parse params
+        if (a.trainparams != None):
+            import ast
+            print a.trainparams
+            trainparams = ast.literal_eval(a.trainparams)
+        else:
+            trainparams = None
+
+        l = train(net, b, trainsteps=a.steps, epoch=a.epoch, plot=a.plot, params=trainparams)
         if a.plot:
             plt.plot(l)
             plt.show()
@@ -295,17 +318,20 @@ def main(parserargs):
             if not os.path.isdir(outdir):
                 os.makedirs(outdir)
 
-            fs = os.listdir(a.input[0])
-            fs = fnmatch.filter(fs, "*.npy")
+            ff = os.listdir(a.input[0])
+            fs = fnmatch.filter(ff, "*.npy")
             fs = [fn.split('_')[0] for fn in fs]
             fs = set(fs)
 
             losslist = []
             for fn in fs:
                 print "Working on ", fn
+                batchsize  = 30
+                numOfSlices = len(fnmatch.filter(ff, fn + "*_ori.npy"))
+                s
                 logging.getLogger(__name__).log(20, "Working on %s"%fn)
-                im64 = np.load(a.input[0] + "/" + fn + "_064.npy")
-                im32 = np.load(a.input[0] + "/" + fn + "_032.npy")
+                im64 = np.load(a.input[0] + "/" + fn + "_128.npy")
+                im32 = np.load(a.input[0] + "/" + fn + "_064.npy")
                 imori = np.load(a.input[0] + "/" + fn + "_ori.npy")
                 targets = {'032': im32, '064':im64, 'ori': imori}
 
@@ -360,10 +386,12 @@ if __name__ == '__main__':
                         help="Set whether to use CUDA or not.")
     parser.add_argument("--train", dest='train', action='store_true', default=False,
                         help="Set whether to train or evaluate, default is eval")
-    parser.add_argument("--train-params", dest='trainparams', action='store', type=dir, default=None,
+    parser.add_argument("--train-params", dest='trainparams', action='store', type=str, default=None,
                         help="Path to a file with dictionary of training parameters written inside")
     parser.add_argument("--log", dest='log', action='store', type=str, default=None,
                         help="If specified, all the messages will be written to the specified file.")
+    parser.add_argument("--pretrain", dest='pretrain', action='store_true', default=False,
+                        help="Use a set of randomly drawn sample from the training data to do 200 steps pretrain")
     a = parser.parse_args()
 
     if (a.log is None):

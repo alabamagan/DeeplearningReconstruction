@@ -17,8 +17,8 @@ class Net(nn.Module):
 
         self.kernelsize1 = 15
         self.kernelsize2 = 5
-        self.channelsize1 = 12
-        self.channelsize2 = 24
+        self.channelsize1 = 24
+        self.channelsize2 = 60
 
         self.linear1 = nn.Linear(1, 1)
 
