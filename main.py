@@ -167,8 +167,8 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
 def evalNet(net, targets, plot=True):
     assert isinstance(targets, dict), "Target should be parsed as dictionaries!"
     assert isinstance(net, network.Net), "Input net is incorrect!"
-    assert targets.has_key('032') and targets.has_key('064'), \
-            "Dictionary must contain data files with key '032' and '064'"
+    assert targets.has_key('128') and targets.has_key('064'), \
+            "Dictionary must contain data files with key '128' and '064'"
     
     if (plot):
         fig = plt.figure(1, figsize=[13,6])
@@ -177,7 +177,7 @@ def evalNet(net, targets, plot=True):
 
     net.eval()
 
-    offset = 5
+    offset = 30
     i2 = targets['064']
     i3 = targets['128']
     last = i2.shape[0] % offset
@@ -325,30 +325,11 @@ def main(parserargs):
                 batchsize  = 30
 
                 images = b[i]
-                imShape = images['ori'].shape
-                numOfSlice = imShape[0]
 
-                if numOfSlice % batchsize == 0:
-                    bstart = np.arange(0, numOfSlice, batchsize)
-                    bstop = bstart + batchsize
-                else:
-                    bstart = np.arange(0, numOfSlice, batchsize)
-                    bstop = bstart + batchsize
-                    bstop[-1] = numOfSlice
+                targets = {'032': images['032'], '064':images['064'], '128': images['128'], 'ori': images['ori']}
 
-                #
-                # im64 = np.load(images['128'])
-                # im32 = np.load(a.input[0] + "/" + fn + "_064.npy")
-                # imori = np.load(a.input[0] + "/" + fn + "_ori.npy")
-                # targets = {'032': im32, '064':im64, 'ori': imori}
-                #
-                # output, loss = evalNet(net, targets, a.plot)
-                for j in xrange(len(bstart)):
-                    start = bstart[j]
-                    stop = bstop[j]
-                    im128 = images['128'][start:stop]
-                    im64 = images['064'][start:stop]
-                    output, loss =
+                output, loss = evalNet(net, targets, a.plot)
+
 
 
                 from algorithm import NpToNii
