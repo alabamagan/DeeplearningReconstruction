@@ -15,17 +15,19 @@ class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
 
-        self.kernelsize1 = 15
+        self.kernelsize1 = 9
         self.kernelsize2 = 5
-        self.channelsize1 = 24
-        self.channelsize2 = 60
+        self.channelsize1 = 16
+        self.channelsize2 = 2
 
         self.linear1 = nn.Linear(1, 1)
 
         self.convsModules = nn.ModuleList()
-        self.deconvsModules = nn.ModuleList()
+        self.psModules = nn.ModuleList()
         self.fcModules = nn.ModuleList()
         self.bnModules = nn.ModuleList()
+        self.poolingLayers = nn.ModuleList()
+        self.linearModules = nn.ModuleList()
 
         self.windows = np.array([32, 32])
         self.overlap = np.array([16, 16])
@@ -52,6 +54,7 @@ class Net(nn.Module):
         x = x2 - x1
 
         self.bnModules['init'] = torch.nn.BatchNorm2d(1)
+        batchnumber = x.data.size()[0]
         x = torch.nn.BatchNorm2d(1).cuda()(x.unsqueeze(1)).squeeze()
         # x = self.linear1(x.view(np.prod(x.data.size()), 1))
         # print x.data.size()
@@ -67,71 +70,67 @@ class Net(nn.Module):
             for j in xrange(s[4]):
                 try:
                     l_conv1 = self.convsModules[0, i, j]
-                    l_conv2 = self.convsModules[1, i, j]
                     l_fc1 = self.fcModules[0, i, j]
-                    l_fc2 = self.fcModules[1, i, j]
-                    l_fc3 = self.fcModules[2, i, j]
-                    # l_fc4 = self.fcModules[3, i, j]
                     l_bn1 = self.bnModules[0, i, j]
                     l_bn2 = self.bnModules[1, i, j]
-                    # l_bn3 = self.bnModules[3, i, j]
-                    l_deconv1 = self.deconvsModules[0, i, j]
-                    l_deconv2 = self.deconvsModules[1, i, j]
+                    l_ps = self.psModules[0, i, j]
+                    l_avgPool = self.poolingLayers[0, i, j]
+                    l_batchWeightFactor = self.linearModules[0, i, j]
+
                 except KeyError:
-                    l_conv1 = nn.Conv2d(1, self.channelsize1, kernel_size=self.kernelsize1)
-                    l_conv2 = nn.Conv2d(self.channelsize1, self.channelsize2, kernel_size=self.kernelsize2)
-                    l_fc1 = nn.ELU()
-                    l_fc2 = nn.ELU()
-                    l_fc3 = nn.ELU()
-                    # l_fc4 = nn.ELU()
+                    l_conv1 = nn.Conv2d(1, self.channelsize1, kernel_size=self.kernelsize1,
+                                        padding=np.int(self.kernelsize1/2.), bias=False)
+                    l_fc1 = nn.ReLU()
                     l_bn1 = nn.BatchNorm2d(self.channelsize1)
-                    l_bn2 = nn.BatchNorm2d(self.channelsize2)
-                    # l_bn3 = nn.BatchNorm2d(24)
-                    l_deconv1 = nn.ConvTranspose2d(self.channelsize1, 1, kernel_size=self.kernelsize1)
-                    l_deconv2 = nn.ConvTranspose2d(self.channelsize2, self.channelsize1, kernel_size=self.kernelsize2)
-                    l_conv1.train()
+                    l_bn2 = nn.BatchNorm2d(1)
+                    l_batchWeightFactor = nn.Linear(batchnumber, batchnumber)
+                    l_ps = nn.PixelShuffle(np.int(np.floor(np.sqrt(self.channelsize1))))
+                    l_avgPool = nn.AvgPool2d(np.int(np.floor(np.sqrt(self.channelsize1))))
+
                     if (x1.is_cuda):
                         l_conv1.cuda()
-                        l_conv2.cuda()
-                        l_fc1.cuda()
-                        l_fc2.cuda()
-                        l_fc3.cuda()
-                        # l_fc4.cuda()
-                        l_bn1.cuda()
-                        l_bn2.cuda()
-                        # l_bn3.cuda()
-                        l_deconv1.cuda()
-                        l_deconv2.cuda()
+                        l_fc1 = l_fc1.cuda()
+                        l_bn1 = l_bn1.cuda()
+                        l_bn2 = l_bn2.cuda()
+                        l_ps = l_ps.cuda()
+                        l_avgPool = l_avgPool.cuda()
+                        l_batchWeightFactor = l_batchWeightFactor.cuda()
+
                     self.convsModules[0, i, j] = l_conv1
-                    self.convsModules[1, i, j] = l_conv2
                     self.fcModules[0, i, j] = l_fc1
-                    self.fcModules[1, i, j] = l_fc2
-                    self.fcModules[2, i, j] = l_fc3
-                    # self.fcModules[3, i, j] = l_fc4
                     self.bnModules[0, i, j] = l_bn1
                     self.bnModules[1, i, j] = l_bn2
-                    # self.bnModules[2, i, j] = l_bn3
-                    self.deconvsModules[0, i, j] = l_deconv1
-                    self.deconvsModules[1, i, j] = l_deconv2
+                    self.psModules[0, i, j] = l_ps
+                    self.poolingLayers[0, i, j] = l_avgPool
+                    self.linearModules[0, i, j] = l_batchWeightFactor
 
 
 
                 l_x = x[:, :, :, i, j].unsqueeze(1)
 
                 if abs(l_x.data.sum()) >= 1e-5:
+                    ss = l_x.data.size()
+                    means = F.avg_pool3d(l_x, kernel_size=[1, ss[-2], ss[-1]]).squeeze()
+                    # means = l_x.contiguous().view([ss[0], np.array(list(ss[1::])).prod()]).mean(1).squeeze()
+                    weights = l_batchWeightFactor(means.unsqueeze(0))
+                    weights = weights.squeeze()
+
                     l_x = l_conv1(l_x)
                     l_x = l_bn1(l_x)
                     l_x = l_fc1(l_x)
 
-                    l_x = l_conv2(l_x)
+                    l_x = l_ps(l_x)
+                    l_x = l_avgPool(l_x)
                     l_x = l_bn2(l_x)
-                    l_x = l_fc2(l_x)
 
-                    l_x = l_deconv2(l_x)
-                    # l_x = l_bn3(l_x)
-                    l_x = l_fc3(l_x)
+                    # if expand takes a list as argument, backwards will causes problemm
+                    ss = [ss[k] for k in xrange(len(ss) - 1, -1, -1)]
+                    temp = weights.expand(ss[0], ss[1], ss[2], ss[3])
+                    temp = temp.transpose(0, 2).transpose(1, 3).transpose(0, 1)
 
-                    l_x = l_deconv1(l_x).squeeze()
+                    l_x = l_x * temp
+                    l_x = l_x.squeeze()
+
                     # l_x = l_fc4(l_x)
                 else:
                     l_x = l_x.squeeze()
@@ -139,7 +138,10 @@ class Net(nn.Module):
                 if (l_V is None):
                     l_V = l_x.unsqueeze(-1).unsqueeze(-1)
                 else:
-                    l_V = torch.cat([l_V, l_x.unsqueeze(-1).unsqueeze(-1)], -1)
+                    try:
+                        l_V = torch.cat([l_V, l_x.unsqueeze(-1).unsqueeze(-1)], -1)
+                    except RuntimeError:
+                        print "[%d,%d]: "%(i,j) + str(l_V.data.size()) + "," + str(l_x.unsqueeze(-1).unsqueeze(-1).data.size())
 
             if (V is None):
                 V = l_V

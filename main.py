@@ -57,7 +57,7 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
     #-------------------------------------
     for i in xrange(trainsteps):
         # index = np.random.randint(0, len(b))
-        sample = b(25)
+        sample = b(30)
         i2 = sample['064']
         i3 = sample['128']
         gt = sample['ori']
@@ -78,6 +78,8 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
             convLR = 10
             fcLR = 2
             bnLR = 2
+            psLR = 2
+            poolingLR = 2
             linearLR = 1
             if params != None:
                 if params.has_key('convLR'):
@@ -86,15 +88,22 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
                     fcLR = params['fcLR']
                 if params.has_key('bnLR'):
                     bnLR = params['bnLR']
+                if params.has_key('psLR'):
+                    psLR =params['psLR']
+                if params.has_key('poolingLR'):
+                    poolingLR = params['poolingLR']
                 if params.has_key('linearLR'):
                     linearLR = params['linearLR']
 
             optimizer = torch.optim.SGD([{'params': net.convsModules.parameters(),
                                           'lr': convLR, 'momentum':1e-2, 'dampening': 1e-2},
-                                         {'params': net.deconvsModules.parameters(), 
-                                          'lr': convLR, 'momentum':1e-3, 'dampling':1e-2},
+                                         {'params': net.psModules.parameters(),
+                                          'lr': psLR, 'momentum':1e-3, 'dampling':1e-2},
+                                         {'params': net.poolingLayers.parameters(),
+                                          'lr': poolingLR, 'momentum':1e-3, 'dampling':1e-2},
                                          {'params': net.fcModules.parameters(), 'lr': fcLR},
                                          {'params': net.bnModules.parameters(), 'lr': bnLR},
+                                         {'params': net.linearModules.parameters(), 'lr': linearLR},
                                          {'params': net.linear1.parameters(),
                                           'lr': linearLR, 'momentum':0, 'dampening':1e-5}
                                          ])
@@ -139,11 +148,11 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
                 ax1.cla()
                 ax2.cla()
                 ax3.cla()
-                ax1.imshow(output.squeeze().cpu().data.numpy()[j], vmin =-1000, vmax=100, cmap="Greys_r")
+                ax1.imshow(output.squeeze().cpu().data.numpy()[j], vmin =-1000, vmax=-500, cmap="Greys_r")
                 ax2.imshow(i3.squeeze().cpu().data.numpy()[j]
-                           - output.squeeze().cpu().data.numpy()[j], vmin = -15, vmax = 15, cmap="jet")
-                ax3.imshow(gt.squeeze().cpu().data.numpy()[j] -
-                           i3.squeeze().cpu().data.numpy()[j],vmin = -15, vmax=15, cmap="Greys_r")
+                           - output.squeeze().cpu().data.numpy()[j], vmin = -15, vmax = 15, cmap="Greys_r")
+                ax3.imshow(i3.squeeze().cpu().data.numpy()[j] -
+                           gt.squeeze().cpu().data.numpy()[j],vmin = -15, vmax=15, cmap="Greys_r")
                 plt.ion()
                 plt.draw()
                 plt.pause(0.01)
@@ -270,7 +279,6 @@ def main(parserargs):
         # Parse params
         if (a.trainparams != None):
             import ast
-            print a.trainparams
             trainparams = ast.literal_eval(a.trainparams)
         else:
             trainparams = None

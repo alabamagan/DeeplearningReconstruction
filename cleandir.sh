@@ -21,5 +21,4 @@ fi
 
 echo "DONE"
 
-return 0
 
