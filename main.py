@@ -95,6 +95,7 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
                 if params.has_key('linearLR'):
                     linearLR = params['linearLR']
 
+
             optimizer = torch.optim.SGD([{'params': net.convsModules.parameters(),
                                           'lr': convLR, 'momentum':1e-2, 'dampening': 1e-2},
                                          {'params': net.psModules.parameters(),
@@ -109,9 +110,13 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
                                          ])
             optimizer.zero_grad()
         else:
-           # Decay learning rate
-           for pg in optimizer.param_groups:
-               pg['lr'] = pg['lr'] * np.exp(-i * float(a.epoch)  / float(trainsteps))
+            # Decay learning rate
+            for pg in optimizer.param_groups:
+                # Exclude linear modules
+                if pg['params'] == list(net.linearModules.parameters()):
+                    continue
+                else:
+                    pg['lr'] = pg['lr'] * np.exp(-i * float(a.epoch)  / float(trainsteps))
 
         #============================================
         # Pre-train phase

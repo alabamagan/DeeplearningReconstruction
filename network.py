@@ -29,6 +29,11 @@ class Net(nn.Module):
         self.poolingLayers = nn.ModuleList()
         self.linearModules = nn.ModuleList()
 
+        self.batchWeightFactor = nn.Linear(1, 1, bias=False)
+        self.linearModules['unique'] = self.batchWeightFactor
+
+        self.bnModules['init'] = torch.nn.BatchNorm2d(1)
+
         self.windows = np.array([32, 32])
         self.overlap = np.array([16, 16])
 
@@ -52,10 +57,7 @@ class Net(nn.Module):
         inshape = x1.data.size()
 
         x = x2 - x1
-
-        self.bnModules['init'] = torch.nn.BatchNorm2d(1)
-        batchnumber = x.data.size()[0]
-        x = torch.nn.BatchNorm2d(1).cuda()(x.unsqueeze(1)).squeeze()
+        x = self.bnModules['init'].cuda()(x.unsqueeze(1)).squeeze()
         # x = self.linear1(x.view(np.prod(x.data.size()), 1))
         # print x.data.size()
         # x = x.view_as(x2)
@@ -75,7 +77,6 @@ class Net(nn.Module):
                     l_bn2 = self.bnModules[1, i, j]
                     l_ps = self.psModules[0, i, j]
                     l_avgPool = self.poolingLayers[0, i, j]
-                    l_batchWeightFactor = self.linearModules[0, i, j]
 
                 except KeyError:
                     l_conv1 = nn.Conv2d(1, self.channelsize1, kernel_size=self.kernelsize1,
@@ -83,7 +84,6 @@ class Net(nn.Module):
                     l_fc1 = nn.ReLU()
                     l_bn1 = nn.BatchNorm2d(self.channelsize1)
                     l_bn2 = nn.BatchNorm2d(1)
-                    l_batchWeightFactor = nn.Linear(batchnumber, batchnumber)
                     l_ps = nn.PixelShuffle(np.int(np.floor(np.sqrt(self.channelsize1))))
                     l_avgPool = nn.AvgPool2d(np.int(np.floor(np.sqrt(self.channelsize1))))
 
@@ -94,7 +94,7 @@ class Net(nn.Module):
                         l_bn2 = l_bn2.cuda()
                         l_ps = l_ps.cuda()
                         l_avgPool = l_avgPool.cuda()
-                        l_batchWeightFactor = l_batchWeightFactor.cuda()
+
 
                     self.convsModules[0, i, j] = l_conv1
                     self.fcModules[0, i, j] = l_fc1
@@ -102,7 +102,6 @@ class Net(nn.Module):
                     self.bnModules[1, i, j] = l_bn2
                     self.psModules[0, i, j] = l_ps
                     self.poolingLayers[0, i, j] = l_avgPool
-                    self.linearModules[0, i, j] = l_batchWeightFactor
 
 
 
@@ -112,8 +111,8 @@ class Net(nn.Module):
                     ss = l_x.data.size()
                     means = F.avg_pool3d(l_x, kernel_size=[1, ss[-2], ss[-1]]).squeeze()
                     # means = l_x.contiguous().view([ss[0], np.array(list(ss[1::])).prod()]).mean(1).squeeze()
-                    weights = l_batchWeightFactor(means.unsqueeze(0))
-                    weights = weights.squeeze()
+                    weights = self.batchWeightFactor(means.unsqueeze(1)).squeeze()
+
 
                     l_x = l_conv1(l_x)
                     l_x = l_bn1(l_x)
