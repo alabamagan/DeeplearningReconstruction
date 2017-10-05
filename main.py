@@ -62,8 +62,8 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
         i3 = sample['128']
         gt = sample['ori']
         gt = Variable(torch.from_numpy(gt)).float().cuda()
-        i2 = Variable(torch.from_numpy(i2))
-        i3 = Variable(torch.from_numpy(i3))
+        i2 = Variable(torch.from_numpy(i2)).float()
+        i3 = Variable(torch.from_numpy(i3)).float()
 
         # offset = 10
         # bstart = np.random.randint(0, i2.data.size()[0] - offset)
@@ -110,8 +110,9 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
             optimizer.zero_grad()
         else:
            # Decay learning rate
-           for pg in optimizer.param_groups:
-               pg['lr'] = pg['lr'] * np.exp(-i * float(a.epoch)  / float(trainsteps))
+           if (a.decay != 0):
+            for pg in optimizer.param_groups:
+               pg['lr'] = pg['lr'] * np.exp(-i * float(a.epoch)  * a.decay / float(trainsteps))
 
         #============================================
         # Pre-train phase
@@ -148,7 +149,9 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
                 ax1.cla()
                 ax2.cla()
                 ax3.cla()
-                ax1.imshow(output.squeeze().cpu().data.numpy()[j], vmin =-1000, vmax=-500, cmap="Greys_r")
+                # ax1.imshow(gt.squeeze().cpu().data.numpy()[j], vmin =-1000, vmax=-500, cmap="Greys_r")
+                ax1.imshow(i3.squeeze().cpu().data.numpy()[j]
+                           - i2.squeeze().cpu().data.numpy()[j], vmin = -15, vmax = 15, cmap="Greys_r")
                 ax2.imshow(i3.squeeze().cpu().data.numpy()[j]
                            - output.squeeze().cpu().data.numpy()[j], vmin = -15, vmax = 15, cmap="Greys_r")
                 ax3.imshow(i3.squeeze().cpu().data.numpy()[j] -
@@ -186,7 +189,7 @@ def evalNet(net, targets, plot=True):
 
     net.eval()
 
-    offset = 30
+    offset = 40
     i2 = targets['064']
     i3 = targets['128']
     last = i2.shape[0] % offset
@@ -379,6 +382,8 @@ if __name__ == '__main__':
                         help="Set where to store outputs for eval mode")
     parser.add_argument("-p", dest='plot', action='store_true', default=False,
                         help="Select whether to disply the plot for stepwise loss")
+    parser.add_argument("-d", "--decayLR", dest='decay', action='store', type=float, default=0,
+                        help="Set decay halflife of the learning rates.")
     parser.add_argument("-e", "--epoch", dest='epoch', action='store', type=int, default=0,
                         help="Select network epoch.")
     parser.add_argument("-s", "--steps", dest='steps', action='store', type=int, default=1000,
