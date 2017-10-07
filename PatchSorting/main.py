@@ -56,56 +56,18 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
     # Actual train phase
     #-------------------------------------
     for i in xrange(trainsteps):
-        # index = np.random.randint(0, len(b))
-        sample = b(15)
-        i2 = sample['064']
-        i3 = sample['128']
-        gt = sample['ori']
-        gt = Variable(torch.from_numpy(gt)).float().cuda()
-        i2 = Variable(torch.from_numpy(i2)).float()
-        i3 = Variable(torch.from_numpy(i3)).float()
 
-        # offset = 10
-        # bstart = np.random.randint(0, i2.data.size()[0] - offset)
-        # bstop = bstart + offset
 
-        output = net.forward(i2.cuda(), i3.cuda())
         #=================================================
         # Add modules params to optimizer
         #-----------------------------------------------
         if (optimizer == None):
-            # Default params
-            convLR = 10
-            fcLR = 2
-            bnLR = 2
-            psLR = 2
-            poolingLR = 2
-            linearLR = 1
+
             if params != None:
-                if params.has_key('convLR'):
-                    convLR = params['convLR']
-                if params.has_key('fcLR'):
-                    fcLR = params['fcLR']
-                if params.has_key('bnLR'):
-                    bnLR = params['bnLR']
-                if params.has_key('psLR'):
-                    psLR =params['psLR']
-                if params.has_key('poolingLR'):
-                    poolingLR = params['poolingLR']
-                if params.has_key('linearLR'):
-                    linearLR = params['linearLR']
+
 
             optimizer = torch.optim.SGD([{'params': net.convsModules.parameters(),
-                                          'lr': convLR, 'momentum':1e-2, 'dampening': 1e-2},
-                                         {'params': net.psModules.parameters(),
-                                          'lr': psLR, 'momentum':1e-3, 'dampling':1e-2},
-                                         {'params': net.poolingLayers.parameters(),
-                                          'lr': poolingLR, 'momentum':1e-3, 'dampling':1e-2},
-                                         {'params': net.fcModules.parameters(), 'lr': fcLR},
-                                         {'params': net.bnModules.parameters(), 'lr': bnLR},
-                                         {'params': net.linearModules.parameters(), 'lr': linearLR},
-                                         {'params': net.linear1.parameters(),
-                                          'lr': linearLR, 'momentum':0, 'dampening':1e-5}
+                                          'lr': convLR, 'momentum':1e-2, 'dampening': 1e-2}
                                          ])
             optimizer.zero_grad()
         else:
@@ -117,20 +79,6 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
         #============================================
         # Pre-train phase
         #-------------------------------------
-        if (i == 0 and epoch == 0 and a.pretrain):
-            if (os.path.isfile("pretrain_checkpoint_E%03d"%(epoch + 1))):
-                net.load_state_dict(torch.load("pretrain_checkpoint_E%03d"%(epoch + 1)))
-                LogPrint("Loading pretrain dict")
-            else:
-                LogPrint(">>>>>>>>>>>>>>> Pre-train Phase <<<<<<<<<<<<<<<<<")
-                for j in xrange(500):
-                    loss = criterion((output.squeeze()), (gt)) / normalize(i3.float().cuda(), gt)
-                    loss.backward()
-                    optimizer.step()
-                    output = net.forward(i2.cuda(), i3.cuda())
-                    LogPrint("[Pretrain %04d] Loss: %.010f"%(j, loss.data[0]))
-                LogPrint(">>>>>>>>>>>>>>> Pre-train Phase End <<<<<<<<<<<<<<<<<")
-                torch.save(net.state_dict(), "pretrain_checkpoint_E%03d"%(epoch + 1))
 
         loss = criterion((output.squeeze()), (gt)) / normalize(i3.float().cuda(), gt)
         print "[Step %04d] Loss: %.010f"%(i, loss.data[0])
@@ -146,21 +94,7 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
         #----------------------------------
         if (plot):
             for j in xrange(output.data.size(0) - 1):
-                ax1.cla()
-                ax2.cla()
-                ax3.cla()
-                ax1.imshow(output.squeeze().cpu().data.numpy()[j], vmin =-300, vmax=400, cmap="Greys_r")
-                #ax1.imshow(i3.squeeze().cpu().data.numpy()[j]
-                #          - i2.squeeze().cpu().data.numpy()[j], vmin = -15, vmax = 15, cmap="Greys_r")
-                ax2.imshow(i3.squeeze().cpu().data.numpy()[j], vmin = -300, vmax = 400, cmap="Greys_r")
-                # ax2.imshow(i3.squeeze().cpu().data.numpy()[j]
-                #            - output.squeeze().cpu().data.numpy()[j], vmin = -15, vmax = 15, cmap="Greys_r")
-                ax3.imshow(gt.squeeze().cpu().data.numpy()[j], vmin = -300, vmax = 400, cmap="Greys_r")
-                # ax3.imshow(i3.squeeze().cpu().data.numpy()[j] -
-                #            gt.squeeze().cpu().data.numpy()[j],vmin = -15, vmax=15, cmap="Greys_r")
-                plt.ion()
-                plt.draw()
-                plt.pause(0.01)
+
 
         if (i % 100 == 0):
             torch.save(net, "checkpoint_E%03d"%(epoch + 1))
@@ -179,68 +113,7 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
     return losslist
 
 def evalNet(net, targets, plot=True):
-    assert isinstance(targets, dict), "Target should be parsed as dictionaries!"
-    assert isinstance(net, network.Net), "Input net is incorrect!"
-    assert targets.has_key('128') and targets.has_key('064'), \
-            "Dictionary must contain data files with key '128' and '064'"
-    
-    if (plot):
-        fig = plt.figure(1, figsize=[13,6])
-        ax1 = fig.add_subplot(121)
-        ax2 = fig.add_subplot(122)
 
-    net.eval()
-
-    offset = 30
-    i2 = targets['064']
-    i3 = targets['128']
-    last = i2.shape[0] % offset
-    if last == 0:
-        indexstart = np.arange(0, i2.shape[0], offset)
-    else:
-        indexstart = np.arange(0, i2.shape[0], offset)[0:-1]
-    indexstop = indexstart + offset
-    i2 = Variable(torch.from_numpy(i2))
-    i3 = Variable(torch.from_numpy(i3))
-    output = None
-    for i in xrange(len(indexstart)):
-        bstart = indexstart[i]
-        bstop = indexstop[i]
-
-        sl = net.forward(i2[bstart:bstop].cuda(), i3[bstart:bstop].cuda())
-        if output is None:
-            output = sl.data.cpu().numpy()
-        else:
-            output = np.concatenate((output, sl.data.cpu().numpy()), 0)
-
-    if last != 0:
-        if last == 1:
-            bstart = indexstop[-1] - 1
-            bstop = bstart + 2
-            sl = net.forward(i2[bstart:bstop].cuda(), i3[bstart:bstop].cuda())
-            output =np.concatenate((output, sl.data.cpu().numpy()[-1].reshape(
-                                [1, sl.data.size(1), sl.data.size(2)])), 0)
-
-        else:
-            bstart = indexstop[-1]
-            bstop = bstart + last
-            sl = net.forward(i2[bstart:bstop].cuda(), i3[bstart:bstop].cuda())
-            output =np.concatenate((output, sl.data.cpu().numpy()), 0)
-
-    # Calculate loss with np if ori exist
-    loss = None
-    if (targets.has_key('ori')):
-        loss =  np.sum(np.abs(targets['ori'] - output)) / \
-                np.sum(np.abs(targets['ori'] - targets['064']))
-        logging.getLogger(__name__).log(20, "Calculated loss: %.05f"%loss)
-
-    if (plot):
-        for i in xrange(output.shape[0]):
-            plt.ion()
-            ax1.imshow(output[i], cmap='Greys_r')
-            ax2.imshow(targets['064'][i], cmap='Greys_r')
-            plt.draw()
-            plt.pause(0.2)
 
     return output, loss
 
@@ -405,12 +278,12 @@ if __name__ == '__main__':
     a = parser.parse_args()
 
     if (a.log is None):
-        if (not os.path.isdir("./Backup/Log")):
-            os.mkdir("./Backup/Log")
+        if (not os.path.isdir("../Backup/Log")):
+            os.mkdir("../Backup/Log")
         if (a.train):
-            a.log = "./Backup/Log/run%03d.log"%(a.epoch)
+            a.log = "../Backup/Log/PatchSort_run%03d.log"%(a.epoch)
         else:
-            a.log = "./Backup/Log/eval_%03d.log"%(a.epoch)
+            a.log = "../Backup/Log/PatchSort_eval_%03d.log"%(a.epoch)
 
     logging.basicConfig(format="[%(asctime)-12s - %(levelname)s] %(message)s", filename=a.log)
 

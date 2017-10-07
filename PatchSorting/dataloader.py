@@ -7,37 +7,20 @@ from torch.utils.data import Dataset, DataLoader
 class BatchLoader(Dataset):
     def __init__(self, rootdir):
         self.root_dir = rootdir
-        self.train = True
         self._ParseRootdir()
+        self._kernelSize = [32, 32]
+        self._compare = ['064', '128']
 
     def __getitem__(self, index):
-        if type(index) == tuple:
-            idx, idy = index
-        else:
-            idx = index
-            idy = None
+        """
+        Description
+        -----------
+          Do NOT use this method
+        :param index:
+        :return:
+        """
+        raise AttributeError("Do NOT use this method")
 
-        if (not self.train):
-            out = {}
-            sample = self.unique_sample_prefix[idx]
-            fs = os.listdir(self.root_dir)
-            for suffix in self.recon_projection_numbers:
-                fs = fnmatch.filter(fs, sample + "_" + suffix + "*")
-                slicenum = len(fs)
-
-                filename = [self.root_dir + "/" + sample + "_" + suffix + "_S%03d.npy"%i for i in xrange(slicenum)]
-                if (idy is None):
-                    # Return whole image
-                    images = [np.load(f) for f in filename]
-                    images = [im.reshape(1, im.shape[0], im.shape[1]) for im in images]
-                    out[suffix] = np.concatenate(images, 0)
-                else:
-                    out[suffix] = np.load(filename[idy])
-        else:
-            raise AssertionError("Get item overload is not available in non-train mode.")
-
-        return out
-        
     def __call__(self, num):
         """
         Description
@@ -51,35 +34,102 @@ class BatchLoader(Dataset):
 
         assert isinstance(num, int), "Call with index"
         assert num > 0, "Why would you want zero samples?"
+        assert num >= self.length, "That few samples are not good for you son."
 
-        out = {}
+        #========================================
+        # Randomly select some patches
+        #--------------------------------
+        patches = []
+        res = int(num % self.length)
+        drawPatches = int(num/self.length)
+        ff = os.listdir(self.root_dir)
+        for index in xrange(self.length):
+            # Get number of slice
+            prefix = self.unique_sample_prefix[index]
+            fs = fnmatch.filter(ff, prefix + "_" + self._compare[0] + "*")
+            fs.sort()
+            numOfSlice = len(fs)
 
-        # Randomly select indexes
-        l = np.random.randint(0, len(self.unique_sample_prefix), num)
-        for index in l:
-            ll = None
-            for suffix in self.recon_projection_numbers:
-                fn = self.unique_sample_prefix[index] + "_" + suffix
+            # Get slice bounds
+            im0 = np.load(self.root_dir + "/" + fs[0])
+            bound = im0.shape
 
-                fs = os.listdir(self.root_dir)
-                fs = fnmatch.filter(fs, fn + "*")
-                numOfSlice = len(fs)
+            # Define patches, assume dimension of the same image are always the same
+            sliceToPatchesStart = np.array(
+                [np.random.randint(0, bound[0] - self._kernelSize[0], size=drawPatches),
+                 np.random.randint(0, bound[1] - self._kernelSize[1], size=drawPatches)]
+            ).T
+            sliceToPatchesStop = np.copy(sliceToPatchesStart)
+            sliceToPatchesStop[:,0] += self._kernelSize[0]
+            sliceToPatchesStop[:,1] += self._kernelSize[1]
+            slicePathces = np.concatenate([sliceToPatchesStart, sliceToPatchesStop], -1) # [xmin, ymin, xmax, ymax]
 
-                if (ll is None):
-                    ll = np.random.randint(0, numOfSlice)
+            # Define which slice the patch is drawn from
+            patchDict = {}
+            for patchBounds in slicePathces:
+                try:
+                    s = np.random.randint(0, numOfSlice)
+                    patchDict[s].append(patchBounds)
+                except KeyError:
+                    patchDict[s] = []
+                    patchDict[s].append(patchBounds)
 
-                ff = self.root_dir + "/" + fn + "_S%03d.npy"%ll
-                im = np.load(ff)
-                im = im.reshape(1, im.shape[0], im.shape[1])
+            # Actually drawn from slices
+            for key in patchDict:
+                im0 = np.load(self.root_dir + "/" + prefix + "_" + self._compare[0] + "_S%03d.npy"%int(key))
+                im1 = np.load(self.root_dir + "/" + prefix + "_" + self._compare[1] + "_S%03d.npy"%int(key))
+                diff = im1 - im0
+                extractedPatches = []
+                for bounds in patchDict[key]:
+                    patch = {}
+                    patch[self._compare[0]] = im0[bounds[0]:bounds[2] + 1, bounds[1]:bounds[3] + 1]
+                    patch[self._compare[1]] = im1[bounds[0]:bounds[2] + 1, bounds[1]:bounds[3] + 1]
+                    patch['diff'] = diff[bounds[0]:bounds[2] + 1, bounds[1]:bounds[3] + 1]
+                    extractedPatches.append(patch)
+                patches.extend(extractedPatches)
 
-                if not out.has_key(suffix):
-                    out[suffix] = im
-                else:
-                    out[suffix] = np.concatenate([im, out[suffix]], 0)
+        #===============================================================
+        # Remaining patches will be draw from first slice of images
+        #-----------------------------------------------------------
+        if (res != 0):
+            sliceToPatchesStart = np.array(
+                [np.random.randint(0, bound[0] - self._kernelSize[0], size=res),
+                 np.random.randint(0, bound[1] - self._kernelSize[1], size=res)]
+            ).T
+            sliceToPatchesStop = np.copy(sliceToPatchesStart)
+            sliceToPatchesStop[:,0] += self._kernelSize[0]
+            sliceToPatchesStop[:,1] += self._kernelSize[1]
+            slicePathces = np.concatenate([sliceToPatchesStart, sliceToPatchesStop], -1) # [xmin, ymin, xmax, ymax]
 
-        return out
+            patchDict = {}
+            for patchBounds in slicePathces:
+                try:
+                    s = np.random.randint(0, self.__len__())
+                    patchDict[s].append(patchBounds)
+                except KeyError:
+                    patchDict[s] = []
+                    patchDict[s].append(patchBounds)
 
 
+            for key in patchDict:
+                prefix = self.unique_sample_prefix[key]
+                im0 = np.load(self.root_dir + "/" + prefix + "_" + self._compare[0] + "_S%03d.npy"%int(0))
+                im1 = np.load(self.root_dir + "/" + prefix + "_" + self._compare[1] + "_S%03d.npy"%int(0))
+                diff = im1 - im0
+                extractedPatches = []
+                for bounds in patchDict[key]:
+                    patch = {}
+                    patch[self._compare[0]] = im0[bounds[0]:bounds[2] + 1, bounds[1]:bounds[3] + 1]
+                    patch[self._compare[1]] = im1[bounds[0]:bounds[2] + 1, bounds[1]:bounds[3] + 1]
+                    patch['diff'] = diff[bounds[0]:bounds[2] + 1, bounds[1]:bounds[3] + 1]
+                    extractedPatches.append(patch)
+                patches.extend(extractedPatches)
+
+
+        return patches
+
+    def _SetKernelSize(self, size):
+        self._kernelSize = size
 
 
     def _ParseRootdir(self):
@@ -100,10 +150,7 @@ class BatchLoader(Dataset):
         self.unique_sample_prefix = filenames
         self.recon_projection_numbers = set(recon_projection_numbers)
 
-        if (not self.train):
-            self.length = len(filenames) / len(recon_projection_numbers)
-        else:
-            self.length = len(self.unique_sample_prefix)
+        self.length = len(self.unique_sample_prefix)
         pass
 
     def SetTrainMode(self, train):

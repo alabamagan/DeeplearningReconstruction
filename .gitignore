@@ -1,3 +1,6 @@
+fig*
+*png
+network_*
 .idea
 TestData
 checkpoint*
