@@ -11,9 +11,9 @@ then
 
 	if  [ $decision == 'y' ] || [ $decision == 'Y' ] 
 	then 
-		BACKUP_FILENAME=`date +"%Y%m%d%S.tar.gz"`
+		BACKUP_FILENAME=`date +"%Y%m%d%R%S.tar.gz"`
 		echo "Saving to $BACKUP_FILENAME"
-		tar acf "${BACKUP_FILENAME}" ${DELETE_TARGETS}
+		tar acf "${BACKUP_FILENAME} ${DELETE_TARGETS}";
 	fi
 
 	rm -rf ${DELETE_TARGETS};
