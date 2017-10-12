@@ -57,7 +57,7 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
     #-------------------------------------
     for i in xrange(trainsteps):
         # index = np.random.randint(0, len(b))
-        sample = b(30)
+        sample = b(20)
         i2 = sample['064']
         i3 = sample['128']
         gt = sample['ori']
@@ -104,8 +104,7 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
                                          {'params': net.fcModules.parameters(), 'lr': fcLR},
                                          {'params': net.bnModules.parameters(), 'lr': bnLR},
                                          {'params': net.linearModules.parameters(), 'lr': linearLR},
-                                         {'params': net.linear1.parameters(),
-                                          'lr': linearLR, 'momentum':0, 'dampening':1e-5}
+                                         {'params': net.miscParams.parameters(), 'lr':1e-1}
                                          ])
             optimizer.zero_grad()
         else:
@@ -149,11 +148,13 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
                 ax1.cla()
                 ax2.cla()
                 ax3.cla()
-                # ax1.imshow(gt.squeeze().cpu().data.numpy()[j], vmin =-1000, vmax=-500, cmap="Greys_r")
+                # ax1.imshow(output.squeeze().cpu().data.numpy()[j], vmin =-300, vmax=400, cmap="Greys_r")
                 ax1.imshow(i3.squeeze().cpu().data.numpy()[j]
-                           - i2.squeeze().cpu().data.numpy()[j], vmin = -15, vmax = 15, cmap="Greys_r")
+                         - i2.squeeze().cpu().data.numpy()[j], vmin = -15, vmax = 15, cmap="Greys_r")
+                # ax2.imshow(i3.squeeze().cpu().data.numpy()[j], vmin = -300, vmax = 400, cmap="Greys_r")
                 ax2.imshow(i3.squeeze().cpu().data.numpy()[j]
                            - output.squeeze().cpu().data.numpy()[j], vmin = -15, vmax = 15, cmap="Greys_r")
+                # ax3.imshow(gt.squeeze().cpu().data.numpy()[j], vmin = -300, vmax = 400, cmap="Greys_r")
                 ax3.imshow(i3.squeeze().cpu().data.numpy()[j] -
                            gt.squeeze().cpu().data.numpy()[j],vmin = -15, vmax=15, cmap="Greys_r")
                 plt.ion()

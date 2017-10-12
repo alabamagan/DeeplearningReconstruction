@@ -160,3 +160,43 @@ class BatchLoader(Dataset):
 
     def __len__(self):
         return self.length
+
+
+class TrainingBatchLoader(Dataset):
+    def __init__(self, rootdir):
+        self.root_dir = rootdir
+        self._ParseRootdir()
+        self._kernelSize = [32, 32]
+        self._compare = ['064', '128']
+
+    def __getitem__(self, index):
+        """
+        Description
+        -----------
+          Do NOT use this method
+        :param index:
+        :return:
+        """
+        raise AttributeError("Do NOT use this method")
+
+    def __call__(self, numOfSamples):
+
+    def __len__(self):
+        return self.length
+
+    def _ParseRootDir(self):
+
+        folders = os.listdir(self.root_dir)
+        if ("start.sh" in folders):
+            folders.remove("start.sh")
+
+        for folder in folders:
+            results = file(self.root_dir + "/result.txt")
+            files = os.listdir(self.root_dir + "/" + folder)
+            files = fnmatch.filter(files, "*.npy")
+            files.sort()
+
+            labels = [l.replace('\n', '') for l in results.readlines()]
+
+            assert len(labels) == len(files), "Result files and data files number mismatch!"
+

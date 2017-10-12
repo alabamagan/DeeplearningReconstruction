@@ -17,10 +17,8 @@ class Net(nn.Module):
 
         self.kernelsize1 = 9
         self.kernelsize2 = 5
-        self.channelsize1 = 16
-        self.channelsize2 = 2
-
-        self.linear1 = nn.Linear(1, 1)
+        self.channelsize1 = 5
+        self.channelsize2 = 25
 
         self.convsModules = nn.ModuleList()
         self.psModules = nn.ModuleList()
@@ -28,11 +26,49 @@ class Net(nn.Module):
         self.bnModules = nn.ModuleList()
         self.poolingLayers = nn.ModuleList()
         self.linearModules = nn.ModuleList()
+        self.miscParams = nn.ParameterList()
+        self.contrastWeight = nn.Parameter(torch.ones(1), requires_grad=True)
+        self.contrastWeightAir = nn.Parameter(torch.ones(1), requires_grad=True)
+        self.contrastWeightTB = nn.Parameter(torch.ones(1), requires_grad=True)
+        self.miscParams.append(self.contrastWeight)
+        self.miscParams.append(self.contrastWeightAir)
+        self.miscParams.append(self.contrastWeightTB)
 
-        self.batchWeightFactor = nn.Linear(1, 1, bias=False)
-        self.linearModules['unique'] = self.batchWeightFactor
-
+        #====================================
+        # Create modules
+        #---------------------
         self.bnModules['init'] = torch.nn.BatchNorm2d(1)
+        self.convAir1 = nn.Conv2d(1, self.channelsize1, kernel_size=self.kernelsize1,
+                                        padding=np.int(self.kernelsize1/2.), bias=False)
+        self.convAir2 = nn.Conv2d(self.channelsize1, self.channelsize2, kernel_size=self.kernelsize1,
+                                        padding=np.int(self.kernelsize1/2.), bias=False)
+        self.convTB1 = nn.Conv2d(1, self.channelsize1, kernel_size=self.kernelsize1,
+                                        padding=np.int(self.kernelsize1/2.), bias=False)
+        self.convTB2 = nn.Conv2d(self.channelsize1, self.channelsize2, kernel_size=self.kernelsize1,
+                                        padding=np.int(self.kernelsize1/2.), bias=False)
+        self.bnAir1 = nn.BatchNorm2d(self.channelsize1)
+        self.bnAir2 = nn.BatchNorm2d(self.channelsize2)
+        self.bnAir3 = nn.BatchNorm2d(1)
+        self.bnTB1 = nn.BatchNorm2d(self.channelsize1)
+        self.bnTB2 = nn.BatchNorm2d(self.channelsize2)
+        self.bnTB3 = nn.BatchNorm2d(1)
+
+        [self.convsModules.append(m) for m in [self.convAir1,
+                                               self.convAir2,
+                                               self.convTB1,
+                                               self.convTB2]]
+        [self.bnModules.append(m) for m in [self.bnAir1,
+                                            self.bnAir2,
+                                            self.bnAir3,
+                                            self.bnTB1,
+                                            self.bnTB2,
+                                            self.bnTB3]]
+
+        self.linear = nn.Linear(1, 1, bias=False)
+        self.linearAir = nn.Linear(1, 1, bias=False)
+        self.linearTB = nn.Linear(1, 1, bias=False)
+        [self.linearModules.append(m) for m in [self.linear, self.linearAir, self.linearTB]]
+
 
         self.windows = np.array([32, 32])
         self.overlap = np.array([16, 16])
@@ -62,98 +98,151 @@ class Net(nn.Module):
         # print x.data.size()
         # x = x.view_as(x2)
 
-
+        xx = self.im2col(x2)
         x = self.im2col(x)
         s = x.data.size()
 
-        V = None
+        #================================================
+        # Re-order columes into different types
+        # 1. Background
+        # 2. Tissues/bench
+        # 3. Air
+        #-----------------------------------------
+        background, TB, Air = None, None, None
+        coords = {}
+        # coordBG, coordTB, coordAir = [], [], []
         for i in xrange(s[3]):
-            l_V = None
             for j in xrange(s[4]):
-                try:
-                    l_conv1 = self.convsModules[0, i, j]
-                    l_fc1 = self.fcModules[0, i, j]
-                    l_bn1 = self.bnModules[0, i, j]
-                    l_bn2 = self.bnModules[1, i, j]
-                    l_ps = self.psModules[0, i, j]
-                    l_avgPool = self.poolingLayers[0, i, j]
+                for batchNum in xrange(s[0]):
+                    patchcoord = (batchNum, i, j) # For recovering patch
 
-                except KeyError:
-                    l_conv1 = nn.Conv2d(1, self.channelsize1, kernel_size=self.kernelsize1,
-                                        padding=np.int(self.kernelsize1/2.), bias=False)
-                    l_fc1 = nn.ReLU()
-                    l_bn1 = nn.BatchNorm2d(self.channelsize1)
-                    l_bn2 = nn.BatchNorm2d(1)
-                    l_ps = nn.PixelShuffle(np.int(np.floor(np.sqrt(self.channelsize1))))
-                    l_avgPool = nn.AvgPool2d(np.int(np.floor(np.sqrt(self.channelsize1))))
+                    imdiff = x[batchNum, :, :, i, j]
+                    im = xx[batchNum, :, :, i, j]
+                    imdiff = imdiff.unsqueeze(0)
+                    if (torch.abs(torch.sum(im)).data[0] <= 1e-4 ):
+                        if (background is None):
+                            background = imdiff
+                        else:
+                            background = torch.cat([background, imdiff] , 0)
+                        coords[patchcoord] = ['background', background.data.size()[0] - 1]
+                    elif (torch.abs(torch.mean(im) + 1000).data[0] < 70):
+                        if (Air is None):
+                            Air = imdiff
+                        else:
+                            Air = torch.cat([Air, imdiff], 0)
+                        coords[patchcoord] = ['Air', Air.data.size()[0] - 1]
+                    else:
+                        if (TB is None):
+                            TB = imdiff
+                        else:
+                            TB = torch.cat([TB, imdiff], 0)
+                        coords[patchcoord] = ['TB', TB.data.size()[0] - 1]
 
-                    if (x1.is_cuda):
-                        l_conv1.cuda()
-                        l_fc1 = l_fc1.cuda()
-                        l_bn1 = l_bn1.cuda()
-                        l_bn2 = l_bn2.cuda()
-                        l_ps = l_ps.cuda()
-                        l_avgPool = l_avgPool.cuda()
-
-
-                    self.convsModules[0, i, j] = l_conv1
-                    self.fcModules[0, i, j] = l_fc1
-                    self.bnModules[0, i, j] = l_bn1
-                    self.bnModules[1, i, j] = l_bn2
-                    self.psModules[0, i, j] = l_ps
-                    self.poolingLayers[0, i, j] = l_avgPool
+        Air = Air.unsqueeze(1)
+        TB = TB.unsqueeze(1)
+        background = background.unsqueeze(1)
 
 
+        #===================================================
+        # Convolution network
+        #===================================================
+        # Air
+        #------- ------------
+        # meanAir = F.avg_pool2d(Air, self.windows).squeeze()
+        # meanAir = self.linearAir(meanAir.unsqueeze(1)).squeeze()
+        # meanAir = F.elu(meanAir)
 
-                l_x = x[:, :, :, i, j].unsqueeze(1)
 
-                if abs(l_x.data.sum()) >= 1e-5:
-                    ss = l_x.data.size()
-                    means = F.avg_pool3d(l_x, kernel_size=[1, ss[-2], ss[-1]]).squeeze()
-                    # means = l_x.contiguous().view([ss[0], np.array(list(ss[1::])).prod()]).mean(1).squeeze()
-                    weights = self.batchWeightFactor(means.unsqueeze(1)).squeeze()
+        Air = self.bnAir1(self.convAir1(Air))
+        Air = F.relu(Air)
+
+        Air = self.bnAir2(self.convAir2(Air))
+        Air = F.relu(Air)
+
+        Air = F.pixel_shuffle(Air, np.int(np.floor(np.sqrt(self.channelsize2))))
+        Air = F.max_pool2d(Air, np.int(np.floor(np.sqrt(self.channelsize2))))
+
+        Air = self.bnAir3(Air) * torch.abs(self.contrastWeightAir.expand_as(Air))
+        # sAir = Air.data.size()
+        # sAir = [sAir[k] for k in xrange(len(sAir) - 1, -1, -1)]
+        # meanAir = meanAir.expand(sAir[0], sAir[1], sAir[2], sAir[3])
+        # meanAir = meanAir.transpose(0, 2).transpose(1, 3).transpose(0, 1)
+        #
+        # Air = Air*meanAir
 
 
-                    l_x = l_conv1(l_x)
-                    l_x = l_bn1(l_x)
-                    l_x = l_fc1(l_x)
+        # TB
+        #---------------------
+        # meanTB = F.avg_pool2d(TB, self.windows).squeeze()
+        # meanTB = self.linearTB(meanTB.unsqueeze(1)).squeeze()
+        # meanTB = F.elu(meanTB)
 
-                    l_x = l_ps(l_x)
-                    l_x = l_avgPool(l_x)
-                    l_x = l_bn2(l_x)
+        TB = self.bnTB1(self.convTB1(TB))
+        TB = F.relu(TB)
 
-                    # if expand takes a list as argument, backwards will causes problemm
-                    ss = [ss[k] for k in xrange(len(ss) - 1, -1, -1)]
-                    temp = weights.expand(ss[0], ss[1], ss[2], ss[3])
-                    temp = temp.transpose(0, 2).transpose(1, 3).transpose(0, 1)
+        TB = self.bnTB2(self.convTB2(TB))
+        TB = F.relu(TB)
 
-                    l_x = l_x * temp
-                    l_x = l_x.squeeze()
+        TB = F.pixel_shuffle(TB, np.int(np.floor(np.sqrt(self.channelsize2))))
+        TB = F.max_pool2d(TB, np.int(np.floor(np.sqrt(self.channelsize2))))
 
-                    # l_x = l_fc4(l_x)
+        TB = self.bnTB3(TB) * torch.abs(self.contrastWeightTB.expand_as(TB))
+        # sTB = TB.data.size()
+        # sTB = [sTB[k] for k in xrange(len(sTB) - 1, -1, -1)]
+        # meanTB = meanTB.expand(sTB[0], sTB[1], sTB[2], sTB[3])
+        # meanTB = meanTB.transpose(0, 2).transpose(1, 3).transpose(0, 1)
+        # TB = TB*meanTB
+
+        #===================================================
+        # Reconstruct back to image colume
+        #-----------------------------------
+        v = None
+        for i in xrange(s[3]):
+            l_v = None
+            for j in xrange(s[4]):
+                l_l_v = None
+                for batchNum in xrange(s[0]):
+                    patchcoord = (batchNum, i, j)
+
+                    pair = coords[patchcoord]
+                    if pair[0] == 'background':
+                        im = background[pair[1]]
+                    elif pair[0] == 'Air':
+                        im = Air[pair[1]]
+                    elif pair[0] == 'TB':
+                        im = TB[pair[1]]
+                    else:
+                        print "Something wrong with patch: ", patchcoord
+                        im = None
+
+                    im = im.unsqueeze(-1).unsqueeze(-1)
+
+                    if l_l_v is None:
+                        l_l_v = im
+                    else:
+                        l_l_v = torch.cat([l_l_v, im], 0)
+                    # ==== End For ====
+                if (l_v is None):
+                    l_v = l_l_v
                 else:
-                    l_x = l_x.squeeze()
-
-                if (l_V is None):
-                    l_V = l_x.unsqueeze(-1).unsqueeze(-1)
-                else:
-                    try:
-                        l_V = torch.cat([l_V, l_x.unsqueeze(-1).unsqueeze(-1)], -1)
-                    except RuntimeError:
-                        print "[%d,%d]: "%(i,j) + str(l_V.data.size()) + "," + str(l_x.unsqueeze(-1).unsqueeze(-1).data.size())
-
-            if (V is None):
-                V = l_V
+                    l_v = torch.cat([l_v, l_l_v], 4)
+                # ==== End For ====
+            if (v is None):
+                v = l_v
             else:
-                V = torch.cat([V, l_V], -2)
+                v = torch.cat([v, l_v], 3)
+            # ==== End For ====
 
-
-        x = self.col2im(V)
+        x = self.col2im(v)
+        # x = F.elu(x)
 
         ## Bad performance
         # x2s = x.data.size()
-        # x = self.linear1(x.view(np.prod(x2s), 1))
+        # x = self.linear(x.view(np.prod(x2s), 1))
         # x = x.view_as(x2)
+        # print self.linear.bias
+        # x = x * torch.abs(self.contrastWeight.expand_as(x))
+        # print self.contrastWeight.data[0]
         x = x2 - x
         return x
 

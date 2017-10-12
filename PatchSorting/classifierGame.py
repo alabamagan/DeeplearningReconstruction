@@ -16,7 +16,7 @@ class ClassifierGame(object):
         # Configs
         self.outputdir = "./" + user
         self.resultfile = "result.txt"
-        self.samplepath = "../SIRT_Parallel_Slices/train"
+        self.samplepath = "/media/storage/Data/CTReconstruction/LCTSC/SIRT_Parallel_Slices/train"
         self.user = user
         self.currentDisplay = 0
         self.numofsamples = 50
@@ -62,16 +62,17 @@ class ClassifierGame(object):
 
         ax1.imshow(self._samples[self.currentDisplay][self.compare[0]], cmap="Greys_r", vmin=-1000, vmax=500)
         ax2.imshow(self._samples[self.currentDisplay][self.compare[1]], cmap="Greys_r", vmin=-1000, vmax=500)
-        ax3.imshow(self._samples[self.currentDisplay][self.compare[2]], cmap="Greys_r", vmin=-10, vmax=10)
+        ax3.imshow(self._samples[self.currentDisplay][self.compare[2]], cmap="jet", vmin=-10, vmax=10)
         [a.axis('off') for a in self._ax]
 
         self._textbox.clear()
         self._textbox.axis('off')
-        self._textbox.text(0, 0, "Explanation: \n" + "A set of 3 images are displayed each time, they are all \n" +
+        self._textbox.text(0, 0, "Explanation: \n" + "A set of 3 images are displayed each time, they are all \n" 
                                  "of the same type. The right-most image is the difference of the left two. \n "
-                                 "Considering only the left-two images, there are a total of 3 classes, defined \n" 
-                                 " as follow. \n"
-                                 "1. (Press Q) Background, 90% are uniformly 0  \n" +
+                                 "You can take reference to the difference to decide which class the set belongs\n"
+                                 "Considering only the left-two images, there are a total of 3 classes, defined\n" 
+                                 "as follow. \n"
+                                 "1. (Press Q) Background, both has 90% uniformly 0  \n" +
                                  "2. (Press W) Tissue/Objects occupies over 10% of pixels  \n" +
                                  "3. (Press E) Air, values at around -1000, may have streak artifacts. \n\n" +
                                  "Press B to go back to last image. \n\n " +
@@ -138,9 +139,9 @@ class ClassifierGame(object):
         for i in xrange(self.numofsamples):
             images = [self._samples[i][c] for c in self.compare]
             outim = np.concatenate([im.reshape(1, im.shape[0], im.shape[1]) for im in images], 0)
-            name = self.outputdir + "/SE%s_%05d"%(str.join(self.compare), i)
+            name = self.outputdir + "/SE%s_%05d"%(self.compare[0] + self.compare[1] + self.compare[2], i)
             np.save(name, outim)
-            
+
 def main():
     name = raw_input("Please enter your name: ")
     if (os.path.isfile(name)):
