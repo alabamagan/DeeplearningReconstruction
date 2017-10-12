@@ -38,31 +38,21 @@ class Net(nn.Module):
         # Create modules
         #---------------------
         self.bnModules['init'] = torch.nn.BatchNorm2d(1)
-        self.convAir1 = nn.Conv2d(1, self.channelsize1, kernel_size=self.kernelsize1,
-                                        padding=np.int(self.kernelsize1/2.), bias=False)
-        self.convAir2 = nn.Conv2d(self.channelsize1, self.channelsize2, kernel_size=self.kernelsize1,
-                                        padding=np.int(self.kernelsize1/2.), bias=False)
-        self.convTB1 = nn.Conv2d(1, self.channelsize1, kernel_size=self.kernelsize1,
-                                        padding=np.int(self.kernelsize1/2.), bias=False)
-        self.convTB2 = nn.Conv2d(self.channelsize1, self.channelsize2, kernel_size=self.kernelsize1,
-                                        padding=np.int(self.kernelsize1/2.), bias=False)
-        self.bnAir1 = nn.BatchNorm2d(self.channelsize1)
-        self.bnAir2 = nn.BatchNorm2d(self.channelsize2)
-        self.bnAir3 = nn.BatchNorm2d(1)
-        self.bnTB1 = nn.BatchNorm2d(self.channelsize1)
-        self.bnTB2 = nn.BatchNorm2d(self.channelsize2)
-        self.bnTB3 = nn.BatchNorm2d(1)
+        self.conv1 = nn.Conv2d(1, self.channelsize1, kernel_size=self.kernelsize1, bias=False)
+        self.conv2 = nn.Conv2d(self.channelsize1, self.channelsize2, kernel_size=self.kernelsize1, bias=False)
+        self.deconv1 = nn.ConvTranspose2d(self.channelsize1, 1, kernel_size=self.kernelsize1, bias=False)
+        self.deconv2 = nn.ConvTranspose2d(self.channelsize2, self.channelsize1, kernel_size=self.kernelsize1, bias=False)
+        self.bn1 = nn.BatchNorm2d(self.channelsize1)
+        self.bn2 = nn.BatchNorm2d(self.channelsize2)
+        self.bn3 = nn.BatchNorm2d(1)
 
-        [self.convsModules.append(m) for m in [self.convAir1,
-                                               self.convAir2,
-                                               self.convTB1,
-                                               self.convTB2]]
-        [self.bnModules.append(m) for m in [self.bnAir1,
-                                            self.bnAir2,
-                                            self.bnAir3,
-                                            self.bnTB1,
-                                            self.bnTB2,
-                                            self.bnTB3]]
+        [self.convsModules.append(m) for m in [self.conv1,
+                                               self.conv2,
+                                               self.deconv1,
+                                               self.deconv2]]
+        [self.bnModules.append(m) for m in [self.bn1,
+                                            self.bn2,
+                                            self.bn3]]
 
         self.linear = nn.Linear(1, 1, bias=False)
         self.linearAir = nn.Linear(1, 1, bias=False)
@@ -87,154 +77,49 @@ class Net(nn.Module):
         assert x1.is_cuda and x2.is_cuda, "Inputs are not in GPU!"
 
 
-        debugplot = False
+        debugplot = True
         windows = self.windows
         overlap = self.overlap
         inshape = x1.data.size()
 
         x = x2 - x1
         x = self.bnModules['init'].cuda()(x.unsqueeze(1)).squeeze()
-        # x = self.linear1(x.view(np.prod(x.data.size()), 1))
         # print x.data.size()
         # x = x.view_as(x2)
 
-        xx = self.im2col(x2)
         x = self.im2col(x)
         s = x.data.size()
 
-        #================================================
-        # Re-order columes into different types
-        # 1. Background
-        # 2. Tissues/bench
-        # 3. Air
-        #-----------------------------------------
-        background, TB, Air = None, None, None
-        coords = {}
-        # coordBG, coordTB, coordAir = [], [], []
-        for i in xrange(s[3]):
-            for j in xrange(s[4]):
-                for batchNum in xrange(s[0]):
-                    patchcoord = (batchNum, i, j) # For recovering patch
+        x = x.contiguous().transpose(1, 3).transpose(2, 4).contiguous()
+        ts = x.data.size()
+        x = x.view(ts[0]*ts[1]*ts[2], 1, ts[3], ts[4])
 
-                    imdiff = x[batchNum, :, :, i, j]
-                    im = xx[batchNum, :, :, i, j]
-                    imdiff = imdiff.unsqueeze(0)
-                    if (torch.abs(torch.sum(im)).data[0] <= 1e-4 ):
-                        if (background is None):
-                            background = imdiff
-                        else:
-                            background = torch.cat([background, imdiff] , 0)
-                        coords[patchcoord] = ['background', background.data.size()[0] - 1]
-                    elif (torch.abs(torch.mean(im) + 1000).data[0] < 70):
-                        if (Air is None):
-                            Air = imdiff
-                        else:
-                            Air = torch.cat([Air, imdiff], 0)
-                        coords[patchcoord] = ['Air', Air.data.size()[0] - 1]
-                    else:
-                        if (TB is None):
-                            TB = imdiff
-                        else:
-                            TB = torch.cat([TB, imdiff], 0)
-                        coords[patchcoord] = ['TB', TB.data.size()[0] - 1]
+        x = self.bn1(self.conv1(x))
+        x = F.relu(x)
 
-        Air = Air.unsqueeze(1)
-        TB = TB.unsqueeze(1)
-        background = background.unsqueeze(1)
+        x = self.bn2(self.conv2(x))
+        x = F.relu(x)
 
+        x = self.deconv2(x)
+        x = self.deconv1(x)
+        x = self.bn3(x) * torch.abs(self.contrastWeight.expand_as(x))
 
-        #===================================================
-        # Convolution network
-        #===================================================
-        # Air
-        #------- ------------
-        # meanAir = F.avg_pool2d(Air, self.windows).squeeze()
-        # meanAir = self.linearAir(meanAir.unsqueeze(1)).squeeze()
-        # meanAir = F.elu(meanAir)
+        x = x.contiguous().view(ts[0], ts[1], ts[2], ts[3], ts[4]).contiguous()
+        x = x.transpose(1, 3).transpose(2, 4).contiguous()
 
-
-        Air = self.bnAir1(self.convAir1(Air))
-        Air = F.relu(Air)
-
-        Air = self.bnAir2(self.convAir2(Air))
-        Air = F.relu(Air)
-
-        Air = F.pixel_shuffle(Air, np.int(np.floor(np.sqrt(self.channelsize2))))
-        Air = F.max_pool2d(Air, np.int(np.floor(np.sqrt(self.channelsize2))))
-
-        Air = self.bnAir3(Air) * torch.abs(self.contrastWeightAir.expand_as(Air))
-        # sAir = Air.data.size()
-        # sAir = [sAir[k] for k in xrange(len(sAir) - 1, -1, -1)]
-        # meanAir = meanAir.expand(sAir[0], sAir[1], sAir[2], sAir[3])
-        # meanAir = meanAir.transpose(0, 2).transpose(1, 3).transpose(0, 1)
-        #
-        # Air = Air*meanAir
-
-
-        # TB
-        #---------------------
-        # meanTB = F.avg_pool2d(TB, self.windows).squeeze()
-        # meanTB = self.linearTB(meanTB.unsqueeze(1)).squeeze()
-        # meanTB = F.elu(meanTB)
-
-        TB = self.bnTB1(self.convTB1(TB))
-        TB = F.relu(TB)
-
-        TB = self.bnTB2(self.convTB2(TB))
-        TB = F.relu(TB)
-
-        TB = F.pixel_shuffle(TB, np.int(np.floor(np.sqrt(self.channelsize2))))
-        TB = F.max_pool2d(TB, np.int(np.floor(np.sqrt(self.channelsize2))))
-
-        TB = self.bnTB3(TB) * torch.abs(self.contrastWeightTB.expand_as(TB))
-        # sTB = TB.data.size()
-        # sTB = [sTB[k] for k in xrange(len(sTB) - 1, -1, -1)]
-        # meanTB = meanTB.expand(sTB[0], sTB[1], sTB[2], sTB[3])
-        # meanTB = meanTB.transpose(0, 2).transpose(1, 3).transpose(0, 1)
-        # TB = TB*meanTB
-
-        #===================================================
-        # Reconstruct back to image colume
-        #-----------------------------------
-        v = None
-        for i in xrange(s[3]):
-            l_v = None
-            for j in xrange(s[4]):
-                l_l_v = None
-                for batchNum in xrange(s[0]):
-                    patchcoord = (batchNum, i, j)
-
-                    pair = coords[patchcoord]
-                    if pair[0] == 'background':
-                        im = background[pair[1]]
-                    elif pair[0] == 'Air':
-                        im = Air[pair[1]]
-                    elif pair[0] == 'TB':
-                        im = TB[pair[1]]
-                    else:
-                        print "Something wrong with patch: ", patchcoord
-                        im = None
-
-                    im = im.unsqueeze(-1).unsqueeze(-1)
-
-                    if l_l_v is None:
-                        l_l_v = im
-                    else:
-                        l_l_v = torch.cat([l_l_v, im], 0)
-                    # ==== End For ====
-                if (l_v is None):
-                    l_v = l_l_v
-                else:
-                    l_v = torch.cat([l_v, l_l_v], 4)
-                # ==== End For ====
-            if (v is None):
-                v = l_v
-            else:
-                v = torch.cat([v, l_v], 3)
-            # ==== End For ====
-
-        x = self.col2im(v)
-        # x = F.elu(x)
+        x = self.col2im(x)
+        # if (debugplot):
+        #     grid = torchvision.utils.make_grid(x.data.unsqueeze(1), nrow=4, padding=5, normalize=True)
+        #     plt.ioff()
+        #     plt.imshow(grid.cpu().numpy().transpose(1, 2, 0))
+        #     plt.show()
+        #     # plt.ion()
+        #     # for i in xrange(31):
+        #     #     for j in xrange(31):
+        #     #         plt.imshow(x.data[0, :, :, i, j].cpu().numpy())
+        #     #         plt.draw()
+        #     #         plt.pause(0.2)
+        # # x = F.elu(x)
 
         ## Bad performance
         # x2s = x.data.size()
