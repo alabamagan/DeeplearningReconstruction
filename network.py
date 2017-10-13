@@ -17,7 +17,7 @@ class Net(nn.Module):
 
         self.kernelsize1 = 9
         self.kernelsize2 = 5
-        self.channelsize1 = 5
+        self.channelsize1 = 8
         self.channelsize2 = 25
 
         self.convsModules = nn.ModuleList()
@@ -52,22 +52,45 @@ class Net(nn.Module):
         self.bnTB1 = nn.BatchNorm2d(self.channelsize1)
         self.bnTB2 = nn.BatchNorm2d(self.channelsize2)
         self.bnTB3 = nn.BatchNorm2d(1)
-
-        [self.convsModules.append(m) for m in [self.convAir1,
-                                               self.convAir2,
-                                               self.convTB1,
-                                               self.convTB2]]
-        [self.bnModules.append(m) for m in [self.bnAir1,
-                                            self.bnAir2,
-                                            self.bnAir3,
-                                            self.bnTB1,
-                                            self.bnTB2,
-                                            self.bnTB3]]
+        self.convsModules.extend([self.convAir1,self.convAir2,self.convTB1,self.convTB2])
+        self.bnModules.extend([self.bnAir1,self.bnAir2,self.bnAir3,self.bnTB1,self.bnTB2,self.bnTB3])
 
         self.linear = nn.Linear(1, 1, bias=False)
-        self.linearAir = nn.Linear(1, 1, bias=False)
-        self.linearTB = nn.Linear(1, 1, bias=False)
+        self.linearAir = nn.Linear(self.channelsize2**2, self.channelsize2**2, bias=True)
+        self.linearTB = nn.Linear(self.channelsize2**2, self.channelsize2**2, bias=True)
         [self.linearModules.append(m) for m in [self.linear, self.linearAir, self.linearTB]]
+
+
+        #===============================
+        # Patch sorting kernel
+        #-----------------------
+        # self.numOfTypes = 5
+        # self.convSort1 = torch.nn.Conv2d(1, 6, 5)
+        # self.convSort2 = torch.nn.Conv2d(6, 15, 5)
+        # self.poolSort1 = torch.nn.MaxPool2d([2, 2])
+        # self.fc1 = nn.Linear(15*2*2, 28)
+        # self.fc2 = nn.Linear(28, self.numOfTypes)
+        #
+        # self.ConvNetwork = []
+        # for i in xrange(self.numOfTypes):
+        #     sub_net = {}
+        #     sub_net['conv1'] = nn.Conv2d(1,
+        #                                  self.channelsize1,
+        #                                  kernel_size=self.kernelsize1,
+        #                                  padding=np.int(self.kernelsize1/2.),
+        #                                  bias=False)
+        #
+        #     sub_net['conv2'] = nn.Conv2d(self.channelsize1,
+        #                                  self.channelsize2,
+        #                                  kernel_size=self.kernelsize1,
+        #                                  padding=np.int(self.kernelsize1/2.),
+        #                                  bias=False)
+        #     sub_net['bn1'], sub_net['bn2'], sub_net['bn3'] = \
+        #         [nn.BatchNorm2d(csize) for csize in [self.channelsize1, self.channelsize2, 1]]
+        #     sub_net['linear'] = nn.Parameter(torch.ones(1), requires_grad=True).cuda()
+        #     self.convsModules.extend([sub_net['conv1'], sub_net['conv2']])
+        #     self.bnModules.extend([sub_net['bn1'], sub_net['bn3'], sub_net['bn3']])
+        #     self.miscParams.append(sub_net['linear'])
 
 
         self.windows = np.array([32, 32])
@@ -125,7 +148,7 @@ class Net(nn.Module):
                         else:
                             background = torch.cat([background, imdiff] , 0)
                         coords[patchcoord] = ['background', background.data.size()[0] - 1]
-                    elif (torch.abs(torch.mean(im) + 1000).data[0] < 70):
+                    elif (torch.abs(torch.mean(im) + 1000).data[0] < 500):
                         if (Air is None):
                             Air = imdiff
                         else:
@@ -137,6 +160,8 @@ class Net(nn.Module):
                         else:
                             TB = torch.cat([TB, imdiff], 0)
                         coords[patchcoord] = ['TB', TB.data.size()[0] - 1]
+
+        del xx
 
         Air = Air.unsqueeze(1)
         TB = TB.unsqueeze(1)

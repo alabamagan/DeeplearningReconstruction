@@ -148,9 +148,9 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
                 ax1.cla()
                 ax2.cla()
                 ax3.cla()
-                # ax1.imshow(output.squeeze().cpu().data.numpy()[j], vmin =-300, vmax=400, cmap="Greys_r")
-                ax1.imshow(i3.squeeze().cpu().data.numpy()[j]
-                         - i2.squeeze().cpu().data.numpy()[j], vmin = -15, vmax = 15, cmap="Greys_r")
+                ax1.imshow(output.squeeze().cpu().data.numpy()[j], vmin =-300, vmax=400, cmap="Greys_r")
+                # ax1.imshow(i3.squeeze().cpu().data.numpy()[j]
+                #          - i2.squeeze().cpu().data.numpy()[j], vmin = -15, vmax = 15, cmap="Greys_r")
                 # ax2.imshow(i3.squeeze().cpu().data.numpy()[j], vmin = -300, vmax = 400, cmap="Greys_r")
                 ax2.imshow(i3.squeeze().cpu().data.numpy()[j]
                            - output.squeeze().cpu().data.numpy()[j], vmin = -15, vmax = 15, cmap="Greys_r")
