@@ -57,7 +57,7 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
     #-------------------------------------
     for i in xrange(trainsteps):
         # index = np.random.randint(0, len(b))
-        sample = b(10)
+        sample = b(14)
         i2 = sample['064']
         i3 = sample['128']
         gt = sample['ori']

@@ -30,39 +30,7 @@ class Net(nn.Module):
         self.poolingLayers = nn.ModuleList()
         self.linearModules = nn.ModuleList()
         self.miscParams = nn.ParameterList()
-        self.contrastWeight = nn.Parameter(torch.ones(1), requires_grad=True)
-        self.contrastWeightAir = nn.Parameter(torch.ones(1), requires_grad=True)
-        self.contrastWeightTB = nn.Parameter(torch.ones(1), requires_grad=True)
-        self.miscParams.append(self.contrastWeight)
-        self.miscParams.append(self.contrastWeightAir)
-        self.miscParams.append(self.contrastWeightTB)
-
-        #====================================
-        # Create modules
-        #---------------------
-        self.bnModules['init'] = torch.nn.BatchNorm2d(1)
-        self.convAir1 = nn.Conv2d(1, self.channelsize1, kernel_size=self.kernelsize1,
-                                        padding=np.int(self.kernelsize1/2.), bias=False)
-        self.convAir2 = nn.Conv2d(self.channelsize1, self.channelsize2, kernel_size=self.kernelsize1,
-                                        padding=np.int(self.kernelsize1/2.), bias=False)
-        self.convTB1 = nn.Conv2d(1, self.channelsize1, kernel_size=self.kernelsize1,
-                                        padding=np.int(self.kernelsize1/2.), bias=False)
-        self.convTB2 = nn.Conv2d(self.channelsize1, self.channelsize2, kernel_size=self.kernelsize1,
-                                        padding=np.int(self.kernelsize1/2.), bias=False)
-        self.bnAir1 = nn.BatchNorm2d(self.channelsize1)
-        self.bnAir2 = nn.BatchNorm2d(self.channelsize2)
-        self.bnAir3 = nn.BatchNorm2d(1)
-        self.bnTB1 = nn.BatchNorm2d(self.channelsize1)
-        self.bnTB2 = nn.BatchNorm2d(self.channelsize2)
-        self.bnTB3 = nn.BatchNorm2d(1)
-        self.convsModules.extend([self.convAir1,self.convAir2,self.convTB1,self.convTB2])
-        self.bnModules.extend([self.bnAir1,self.bnAir2,self.bnAir3,self.bnTB1,self.bnTB2,self.bnTB3])
-
-        self.linear = nn.Linear(1, 1, bias=False)
-        self.linearAir = nn.Linear(self.channelsize2**2, self.channelsize2**2, bias=True)
-        self.linearTB = nn.Linear(self.channelsize2**2, self.channelsize2**2, bias=True)
-        [self.linearModules.append(m) for m in [self.linear, self.linearAir, self.linearTB]]
-
+        self.bnModules['init'] = nn.BatchNorm2d(1)
 
         #===============================
         # Patch sorting kernel
@@ -73,6 +41,8 @@ class Net(nn.Module):
         self.poolSort1 = torch.nn.MaxPool2d(2, 2)
         self.fc1 = nn.Linear(np.prod(((self.windows - 4)/2 - 4 )/2) * 15, 28)
         self.fc2 = nn.Linear(28, self.numOfTypes)
+        self.convsModules.extend([self.convSort1, self.convSort2])
+        self.fcModules.extend([self.fc1, self.fc2, self.poolSort1])
 
         self.ConvNetwork = []
         for i in xrange(self.numOfTypes):
@@ -163,6 +133,7 @@ class Net(nn.Module):
         for i in xrange(len(sortedcols)):
             col = sortedcols[i]
             if col is None:
+                print "Col ", i, " is None"
                 continue
 
             col = col.unsqueeze(1).contiguous()
@@ -173,7 +144,9 @@ class Net(nn.Module):
             col = F.relu(bn2(conv2(col)))
             col = F.pixel_shuffle(col, np.int(np.floor(np.sqrt(self.channelsize2))))
             col = F.avg_pool2d(col, np.int(np.floor(np.sqrt(self.channelsize2))))
-            col = col * mean.expand_as(col)
+            col = bn3(col)
+            col = col * torch.abs(mean.expand_as(col))
+            sortedcols[i] = col
 
         v = None
         for i in xrange(s[3]):
@@ -185,7 +158,7 @@ class Net(nn.Module):
 
                     pair = coords[patchcoord]
                     im = sortedcols[pair[0]][pair[1]]
-                    im = im.unsqueeze(-1).unsqueeze(-1).unsqueeze(0)
+                    im = im.unsqueeze(-1).unsqueeze(-1)
 
                     if l_l_v is None:
                         l_l_v = im
