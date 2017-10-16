@@ -314,7 +314,14 @@ class Net(nn.Module):
             # ==== End For ====
 
         x = self.col2im(v)
+        s = x.data.size()
         # x = F.elu(x)
+
+        # Zero out some values
+        for i in xrange(s[-2]):
+            for j in xrange(s[-1]):
+                if (i - s[-2]/2.) ** 2 + (j - s[-1]/2.)** 2 > ((s[-2]/2.) ** 2. + (s[-1]/2.) ** 2.)/2. + 1:
+                    x[:,i, j] = 0
 
         ## Bad performance
         # x2s = x.data.size()
