@@ -11,11 +11,13 @@ import os
 import gc
 import logging
 import argparse
+import visdom
 from dataloader import BatchLoader
 
 #============================================
 # Prepare global logger
 logging.getLogger(__name__).setLevel(10)
+vis = visdom.Visdom(port=80, server='http://137.189.141.212')
 
 def LogPrint(msg, level=20):
     logging.getLogger(__name__).log(level, msg)
@@ -36,20 +38,14 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
     :return:
     """
     net.train()
+    net.current_epoch = epoch
 
     optimizer = None
-
-    if (plot):
-        fig = plt.figure(1, figsize=[13,6])
-        ax1 = fig.add_subplot(131)
-        ax2 = fig.add_subplot(132)
-        ax3 = fig.add_subplot(133)
 
     criterion = torch.nn.SmoothL1Loss().cuda()
     criterion.size_average = True
     normalize = torch.nn.SmoothL1Loss().cuda()
     normalize.size_average = True
-    losslist = []
 
 
     #============================================
@@ -57,7 +53,7 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
     #-------------------------------------
     for i in xrange(trainsteps):
         # index = np.random.randint(0, len(b))
-        sample = b(14)
+        sample = b(10)
         i2 = sample['064']
         i3 = sample['128']
         gt = sample['ori']
@@ -134,7 +130,8 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
         loss = criterion((output.squeeze()), (gt)) / normalize(i3.float().cuda(), gt)
         print "[Step %04d] Loss: %.010f"%(i, loss.data[0])
         logging.getLogger(__name__).log(20, "[Step %04d] Loss: %.010f"%(i, loss.data[0]))
-        losslist.append(loss.data[0])
+        net.current_step += 1
+        net.loss_list.append(loss.data[0])
         loss.backward()
 
 
@@ -144,22 +141,42 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
         # Plot for visualization of result
         #----------------------------------
         if (plot):
-            for j in xrange(output.data.size(0) - 1):
-                ax1.cla()
-                ax2.cla()
-                ax3.cla()
-                ax1.imshow(output.squeeze().cpu().data.numpy()[j], vmin =-300, vmax=400, cmap="Greys_r")
-                # ax1.imshow(i3.squeeze().cpu().data.numpy()[j]
-                #          - i2.squeeze().cpu().data.numpy()[j], vmin = -15, vmax = 15, cmap="Greys_r")
-                # ax2.imshow(i3.squeeze().cpu().data.numpy()[j], vmin = -300, vmax = 400, cmap="Greys_r")
-                ax2.imshow(i3.squeeze().cpu().data.numpy()[j]
-                           - output.squeeze().cpu().data.numpy()[j], vmin = -15, vmax = 15, cmap="Greys_r")
-                # ax3.imshow(gt.squeeze().cpu().data.numpy()[j], vmin = -300, vmax = 400, cmap="Greys_r")
-                ax3.imshow(i3.squeeze().cpu().data.numpy()[j] -
-                           gt.squeeze().cpu().data.numpy()[j],vmin = -15, vmax=15, cmap="Greys_r")
-                plt.ion()
-                plt.draw()
-                plt.pause(0.01)
+            paramstext = "<h2>Step %03d </h2> <br>"%i + \
+                         "<h3>Col Means: " + \
+                         ", ".join([str(p.data[0]) for p in net.miscParams.parameters()]) + \
+                         "</h3>"
+
+            displayrangeIm = [-1000, 300]
+            displayrangeDiff = [-15, 15]
+            normIm = lambda inIm: inIm.clip(displayrangeIm[0], displayrangeIm[1])/\
+                                  float(displayrangeIm[1] - displayrangeIm[0])
+            normDiff = lambda inIm: inIm.clip(displayrangeDiff[0], displayrangeDiff[1])/\
+                                  float(displayrangeDiff[1] - displayrangeDiff[0])
+
+            im1 = (i3.squeeze().unsqueeze(1).data.cpu() -
+                   i2.squeeze().unsqueeze(1).data.cpu()).numpy()
+            im2 = (i3.squeeze().unsqueeze(1).data.cpu() -
+                   output.squeeze().unsqueeze(1).data.cpu()).numpy()
+            im3 = (gt.squeeze().unsqueeze(1).data.cpu() -
+                   i3.squeeze().unsqueeze(1).data.cpu()).numpy()
+            im4 = (i3.squeeze().unsqueeze(1).data.cpu()).numpy()
+            im5 = (output.squeeze().unsqueeze(1).data.cpu()).numpy()
+            im1, im2, im3 = [normDiff(im) for im in [im1, im2, im3]]
+            im4, im5 = [normIm(im) for im in [im4, im5]]
+            im1, im2, im3, im4, im5 = [im + abs(im.min()) for im in [im1, im2, im3, im4, im5]]
+
+            vis.text(paramstext, env="Results", win="ParamsWindow")
+
+            vis.images(im1, nrow=1, env="Results", win="ImWindow1")
+            vis.images(im2, nrow=1, env="Results", win="ImWindow2")
+            vis.images(im3, nrow=1, env="Results", win="ImWindow3")
+            vis.images(im4, nrow=1, env="Results", win="ImWindow4")
+            vis.images(im5, nrow=1, env="Results", win="ImWindow5")
+
+            losslist = np.array(net.loss_list)
+            vis.line(losslist, env="Plots", win="TrainingLoss")
+
+
 
         if (i % 100 == 0):
             torch.save(net, "checkpoint_E%03d"%(epoch + 1))
@@ -168,14 +185,13 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
         del sample, i2, i3, gt
         gc.collect()
 
-    losslist = np.array(losslist)
     print "======================= End train epoch %03d ======================="%(epoch + 1)
     print "average loss: ", losslist.mean()
     print "final loss: ", losslist[-1]
     logging.getLogger(__name__).log(20,"======================= End train epoch %03d ======================="%(epoch + 1))
     logging.getLogger(__name__).log(20,"Average loss: %.05f"%losslist.mean())
     torch.save(net, "network_E%03d"%(epoch + 1))
-    return losslist
+    return net.loss_list
 
 def evalNet(net, targets, plot=True):
     assert isinstance(targets, dict), "Target should be parsed as dictionaries!"
@@ -288,21 +304,21 @@ def main(parserargs):
             trainparams = None
 
         l = train(net, b, trainsteps=a.steps, epoch=a.epoch, plot=a.plot, params=trainparams)
-        if a.plot:
-            plt.plot(l)
-            plt.show()
-        else:
-            print "Saving figure..."
-            logging.getLogger(__name__).log(10, "Saving figure...")
-            plt.switch_backend('Agg')
-            fig = plt.figure()
-            fig.set_tight_layout(True)
-            ax1 = fig.add_subplot(111)
-            ax1.set_title("Training network Epoch %03d"%(a.epoch + 1))
-            ax1.set_xlabel("Step")
-            ax1.set_ylabel("Loss")
-            ax1.plot(l)
-            fig.savefig("fig_E%03d.png"%(a.epoch))
+        # if a.plot:
+        #     plt.plot(l)
+        #     plt.show()
+        # else:
+        #     print "Saving figure..."
+        #     logging.getLogger(__name__).log(10, "Saving figure...")
+        #     plt.switch_backend('Agg')
+        #     fig = plt.figure()
+        #     fig.set_tight_layout(True)
+        #     ax1 = fig.add_subplot(111)
+        #     ax1.set_title("Training network Epoch %03d"%(a.epoch + 1))
+        #     ax1.set_xlabel("Step")
+        #     ax1.set_ylabel("Loss")
+        #     ax1.plot(l)
+        #     fig.savefig("fig_E%03d.png"%(a.epoch))
 
     #==================================
     # Evaluation
@@ -413,6 +429,9 @@ if __name__ == '__main__':
 
     logging.basicConfig(format="[%(asctime)-12s - %(levelname)s] %(message)s", filename=a.log)
 
-    main(a)
+    try:
+        main(a)
+    except:
+        vis.text("Interupted!", win='ParamsWindow', env="Results")
 
     # main()

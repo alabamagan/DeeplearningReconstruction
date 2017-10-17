@@ -6,10 +6,12 @@ from torch.autograd import Variable
 from algorithm import ExtractPatchIndexs
 from pyinn import im2col, col2im
 from pyinn.im2col import Im2Col, Col2Im
-
+import visdom
 # testing
 import matplotlib.pyplot as plt
 import numpy as np
+
+vis = visdom.Visdom(port=80)
 
 class Net(nn.Module):
     def __init__(self):
@@ -17,8 +19,8 @@ class Net(nn.Module):
 
         self.kernelsize1 = 9
         self.kernelsize2 = 5
-        self.channelsize1 = 8
-        self.channelsize2 = 25
+        self.channelsize1 =8
+        self.channelsize2 = 49
 
         self.windows = np.array([32, 32])
         self.overlap = np.array([16, 16])
@@ -35,7 +37,7 @@ class Net(nn.Module):
         #===============================
         # Patch sorting kernel
         #-----------------------
-        self.numOfTypes = 5
+        self.numOfTypes = 3
         self.convSort1 = torch.nn.Conv2d(1, 6, 5)
         self.convSort2 = torch.nn.Conv2d(6, 15, 5)
         self.poolSort1 = torch.nn.MaxPool2d(2, 2)
@@ -68,7 +70,9 @@ class Net(nn.Module):
             self.ConvNetwork.append(sub_net)
 
 
-
+        self.current_step = 0
+        self.current_epoch = 0
+        self.loss_list = []
 
         self.im2col = Im2Col(self.windows, self.windows - self.overlap, 0)
         self.col2im = Col2Im(self.windows, self.windows - self.overlap, 0)
@@ -82,19 +86,13 @@ class Net(nn.Module):
         """
         assert x1.is_cuda and x2.is_cuda, "Inputs are not in GPU!"
 
-
-        debugplot = False
-        windows = self.windows
-        overlap = self.overlap
-        inshape = x1.data.size()
-
         x = x2 - x1
         x = self.bnModules['init'].cuda()(x.unsqueeze(1)).squeeze()
         # x = self.linear1(x.view(np.prod(x.data.size()), 1))
         # print x.data.size()
         # x = x.view_as(x2)
 
-        xx = self.im2col(x2)
+        xx = self.im2col(x)
         x = self.im2col(x)
         s = x.data.size()
 
@@ -130,12 +128,22 @@ class Net(nn.Module):
                         sortedcols[index] = torch.cat([sortedcols[index], imdiff], 0)
                     coords[patchcoord] = [index, sortedcols[index].data.size()[0] - 1]
 
+
         for i in xrange(len(sortedcols)):
             col = sortedcols[i]
             if col is None:
                 print "Col ", i, " is None"
                 continue
 
+            displayrangeIm = [-1000, 300]
+            displayrangeDiff = [-15, 15]
+            normIm = lambda inIm: inIm.clip(displayrangeIm[0], displayrangeIm[1])/\
+                                  float(displayrangeIm[1] - displayrangeIm[0])
+            normDiff = lambda inIm: inIm.clip(displayrangeDiff[0], displayrangeDiff[1])/\
+                                  float(displayrangeDiff[1] - displayrangeDiff[0])
+            d = normDiff(col[0:200].unsqueeze(1).data.cpu().numpy())
+            d += d.min()
+            vis.images(d, nrow=20, win="SortedColume%i"%i, env="Plots")
             col = col.unsqueeze(1).contiguous()
             conv1, conv2 = [self.ConvNetwork[i]['conv1'], self.ConvNetwork[i]['conv2']]
             bn1, bn2, bn3 = [self.ConvNetwork[i]['bn1'], self.ConvNetwork[i]['bn2'], self.ConvNetwork[i]['bn3']]
@@ -147,6 +155,9 @@ class Net(nn.Module):
             col = bn3(col)
             col = col * torch.abs(mean.expand_as(col))
             sortedcols[i] = col
+
+
+
 
         v = None
         for i in xrange(s[3]):
