@@ -143,7 +143,7 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
         if (plot):
             paramstext = "<h2>Step %03d </h2> <br>"%i + \
                          "<h3>Col Means: " + \
-                         ", ".join([str(p.data[0]) for p in net.miscParams.parameters()]) + \
+                         ", ".join([str(p.data[0]) for p in net.linearModules.parameters()]) + \
                          "</h3>"
 
             displayrangeIm = [-1000, 300]
@@ -154,14 +154,15 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
                                   float(displayrangeDiff[1] - displayrangeDiff[0])
 
             im1 = (i3.squeeze().unsqueeze(1).data.cpu() -
-                   i2.squeeze().unsqueeze(1).data.cpu()).numpy()
-            im2 = (i3.squeeze().unsqueeze(1).data.cpu() -
-                   output.squeeze().unsqueeze(1).data.cpu()).numpy()
+                   i2.squeeze().unsqueeze(1).data.cpu()).numpy() # Original diff
+            im2 = (output.squeeze().unsqueeze(1).data.cpu() -
+                   i3.squeeze().unsqueeze(1).data.cpu()).numpy() # Processed Diff
             im3 = (gt.squeeze().unsqueeze(1).data.cpu() -
-                   i3.squeeze().unsqueeze(1).data.cpu()).numpy()
-            im4 = (i3.squeeze().unsqueeze(1).data.cpu()).numpy()
-            im5 = (output.squeeze().unsqueeze(1).data.cpu()).numpy()
-            im1, im2, im3 = [normDiff(im) for im in [im1, im2, im3]]
+                   i3.squeeze().unsqueeze(1).data.cpu()).numpy() # Ground True Diff
+            im4 = (i3.squeeze().unsqueeze(1).data.cpu()).numpy() # Original Im
+            im5 = (output.squeeze().unsqueeze(1).data.cpu()).numpy() # Processed truth Im
+            im6 = im2 - im3 # Processed to ground truth diff
+            im1, im2, im3, im6 = [normDiff(im) for im in [im1, im2, im3, im6]]
             im4, im5 = [normIm(im) for im in [im4, im5]]
             im1, im2, im3, im4, im5 = [im + abs(im.min()) for im in [im1, im2, im3, im4, im5]]
 
@@ -170,7 +171,7 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
             vis.images(im1, nrow=1, env="Results", win="ImWindow1")
             vis.images(im2, nrow=1, env="Results", win="ImWindow2")
             vis.images(im3, nrow=1, env="Results", win="ImWindow3")
-            vis.images(im4, nrow=1, env="Results", win="ImWindow4")
+            vis.images(im6, nrow=1, env="Results", win="ImWindow4")
             vis.images(im5, nrow=1, env="Results", win="ImWindow5")
 
             losslist = np.array(net.loss_list)
@@ -429,9 +430,11 @@ if __name__ == '__main__':
 
     logging.basicConfig(format="[%(asctime)-12s - %(levelname)s] %(message)s", filename=a.log)
 
-    try:
-        main(a)
-    except:
-        vis.text("Interupted!", win='ParamsWindow', env="Results")
+    main(a)
+
+    # try:
+    #     main(a)
+    # except:
+    #     vis.text("Interupted!", win='ParamsWindow', env="Results")
 
     # main()
