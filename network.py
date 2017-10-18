@@ -13,6 +13,25 @@ import numpy as np
 
 vis = visdom.Visdom(port=80)
 
+
+class ResidualDownTransition(nn.Module):
+    def __init__(self, feqtureSize, kernsize):
+        super(ResidualDownTransition, self).__init__()
+
+        self.feqtureSize = feqtureSize
+
+        pad = np.int(kernsize/2.)
+        self.conv1 = nn.Conv2d(feqtureSize, feqtureSize, kernel_size=kernsize,padding=pad, bias=False)
+        self.bn1 = nn.BatchNorm2d(feqtureSize)
+        self.conv2 = nn.Conv2d(feqtureSize, feqtureSize, kernel_size=kernsize,padding=pad, bias=False)
+        self.bn2 = nn.BatchNorm2d(feqtureSize)
+
+    def forward(self, x):
+
+        down = F.relu(self.bn1(self.conv1(x)))
+        down = F.relu(self.bn2(self.conv2(down)) + x)
+        return down
+
 class WeightedSum(nn.Module):
     def __init__(self, channels, positive=True):
         super(WeightedSum, self).__init__()
@@ -74,6 +93,8 @@ class Net(nn.Module):
         super(Net, self).__init__()
 
         self.kernsize = 7
+        self.chansize = 32
+        self.num_of_layers = 5
 
         self.convsModules = nn.ModuleList()
         self.psModules = nn.ModuleList()
@@ -84,18 +105,14 @@ class Net(nn.Module):
         self.miscParams = nn.ParameterList()
         self.bnModules['init'] = nn.BatchNorm2d(1)
 
+        self.d_32 = DownTransition(1, self.chansize, self.kernsize)
+        self.DTrans = [ResidualDownTransition(self.chansize, self.kernsize)
+                       for i in xrange(self.num_of_layers - 1)]
+        self.d_36 = DownTransition(self.chansize, 36, self.kernsize)
+        self.u   = UpTransition(np.int(np.sqrt(36)))
 
-        self.base_conv_channels = 32
-        self.sub_conv_channels = [16, 25, 36, 49, 64]
-
-        self.baseconv = DownTransition(1, 32, self.kernsize)
-        self.down = [DownTransition(32, i, self.kernsize) for i in self.sub_conv_channels]
-        self.up   = [UpTransition(np.int(np.sqrt(i))) for i in self.sub_conv_channels]
-        self.w    = WeightedSum(len(self.sub_conv_channels))
-        self.linearModules.append(self.w)
-        self.convsModules.extend(self.up)
-        self.convsModules.extend(self.down)
-        self.convsModules.append(self.baseconv)
+        self.convsModules.extend([d for d in self.DTrans])
+        self.psModules.append(self.u)
 
         self.CircularMask = None
 
@@ -115,11 +132,13 @@ class Net(nn.Module):
         orix = x2 - x1
         x = self.bnModules['init'].cuda()(orix.unsqueeze(1))
 
-        x = self.baseconv.forward(x)
-        xx = [m.forward(x) for m in self.down]
-        xx = [self.up[i].forward(xx[i]) for i in xrange(len(self.sub_conv_channels))]
-        xx = torch.cat(xx, 1)
-        x = self.w.forward(xx)
+        x = self.d_32.forward(x)
+        for i in xrange(self.num_of_layers - 1):
+            x = self.DTrans[i].forward(x)
+
+        x = self.d_36.forward(x)
+        x = self.u.forward(x)
+        x = x.squeeze()
         s = x.data.size()
 
         if self.CircularMask is None:
@@ -130,7 +149,7 @@ class Net(nn.Module):
                         self.CircularMask.append([i,j])
 
         for c in self.CircularMask:
-            x[:,c[0],c[1]] = 10
+            x[:,c[0],c[1]] = 0
 
         x = x2 - x
         return x
