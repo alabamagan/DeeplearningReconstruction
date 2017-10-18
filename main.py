@@ -42,9 +42,9 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
 
     optimizer = None
 
-    criterion = torch.nn.SmoothL1Loss().cuda()
+    criterion = torch.nn.MSELoss().cuda()
     criterion.size_average = True
-    normalize = torch.nn.SmoothL1Loss().cuda()
+    normalize = torch.nn.MSELoss().cuda()
     normalize.size_average = True
 
 
@@ -175,7 +175,7 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
             vis.images(im5, nrow=1, env="Results", win="ImWindow5")
 
             losslist = np.array(net.loss_list)
-            vis.line(losslist, env="Plots", win="TrainingLoss")
+            vis.line(losslist, np.arange(len(net.loss_list)), env="Plots", win="TrainingLoss")
 
 
 

@@ -32,28 +32,6 @@ class ResidualDownTransition(nn.Module):
         down = F.relu(self.bn2(self.conv2(down)) + x)
         return down
 
-class WeightedSum(nn.Module):
-    def __init__(self, channels, positive=True):
-        super(WeightedSum, self).__init__()
-
-        self.channels = channels
-        self.positive = positive
-        self.params = nn.ParameterList()
-        self.params.extend([nn.Parameter(torch.ones(1)) for i in xrange(channels)])
-
-
-    def forward(self, x):
-        assert x.data.size()[1] == self.channels, "Wrong number of channels!"
-
-        tempx = x[:, 0] * self.params[0].expand_as(x[:,0])
-        for i in xrange(1, self.channels):
-            if self.positive:
-                tempx = tempx + x[:,i] * torch.abs(self.params[i]).expand_as(x[:,i])
-            else:
-                tempx = tempx + x[:,i] * self.params[i].expand_as(x[:,i])
-        x = tempx / self.channels
-        return x
-
 class DownTransition(nn.Module):
     def __init__(self, inchan, outchan, kernsize, padding=True):
         super(DownTransition, self).__init__()
@@ -79,11 +57,13 @@ class UpTransition(nn.Module):
     def __init__(self, upscaleFactor):
         super(UpTransition, self).__init__()
 
+        self.upsam = nn.UpsamplingBilinear2d(scale_factor=2)
         self.ps = nn.PixelShuffle(upscaleFactor)
         self.pool = nn.AvgPool2d(upscaleFactor)
         self.bn = nn.BatchNorm2d(1)
 
     def forward(self, x):
+        x = self.upsam(x)
         x = self.pool(self.ps(x))
         x = self.bn(x)
         return x
@@ -92,9 +72,9 @@ class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
 
-        self.kernsize = 7
+        self.kernsize = 9
         self.chansize = 32
-        self.num_of_layers = 5
+        self.num_of_layers = 20
 
         self.convsModules = nn.ModuleList()
         self.psModules = nn.ModuleList()
@@ -105,7 +85,8 @@ class Net(nn.Module):
         self.miscParams = nn.ParameterList()
         self.bnModules['init'] = nn.BatchNorm2d(1)
 
-        self.d_32 = DownTransition(1, self.chansize, self.kernsize)
+        self.d_32 = DownTransition(1, 32, self.kernsize)
+        # self.d_64 = DownTransition(16, self.chansize, self.kernsize)
         self.DTrans = [ResidualDownTransition(self.chansize, self.kernsize)
                        for i in xrange(self.num_of_layers - 1)]
         self.d_36 = DownTransition(self.chansize, 36, self.kernsize)
@@ -131,8 +112,10 @@ class Net(nn.Module):
 
         orix = x2 - x1
         x = self.bnModules['init'].cuda()(orix.unsqueeze(1))
+        x = F.avg_pool2d(x, 2)
 
         x = self.d_32.forward(x)
+        # x = self.d_64.forward(x)
         for i in xrange(self.num_of_layers - 1):
             x = self.DTrans[i].forward(x)
 
