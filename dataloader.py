@@ -7,7 +7,6 @@ from torch.utils.data import Dataset, DataLoader
 class BatchLoader(Dataset):
     def __init__(self, rootdir):
         self.root_dir = rootdir
-        self.train = True
         self._ParseRootdir()
 
     def __getitem__(self, index):
@@ -17,24 +16,26 @@ class BatchLoader(Dataset):
             idx = index
             idy = None
 
-        if (not self.train):
-            out = {}
-            sample = self.unique_sample_prefix[idx]
-            fs = os.listdir(self.root_dir)
-            for suffix in self.recon_projection_numbers:
-                fs = fnmatch.filter(fs, sample + "_" + suffix + "*")
-                slicenum = len(fs)
+        out = {}
+        sample = self.unique_sample_prefix[idx]
+        ff = os.listdir(self.root_dir)
 
-                filename = [self.root_dir + "/" + sample + "_" + suffix + "_S%03d.npy"%i for i in xrange(slicenum)]
-                if (idy is None):
-                    # Return whole image
-                    images = [np.load(f) for f in filename]
-                    images = [im.reshape(1, im.shape[0], im.shape[1]) for im in images]
-                    out[suffix] = np.concatenate(images, 0)
-                else:
-                    out[suffix] = np.load(filename[idy])
-        else:
-            raise AssertionError("Get item overload is not available in non-train mode.")
+        for suffix in self.recon_projection_numbers:
+            fs = fnmatch.filter(ff, sample + "_" + suffix + "*")
+            fs.sort()
+
+            slicenum = len(fs)
+            filename = [self.root_dir + "/" + sample + "_" + suffix + "_S%03d.npy"%i for i in xrange(slicenum)]
+            if len(filename) == 0:
+                continue
+
+            if (idy is None):
+                # Return whole image
+                images = [np.load(f) for f in filename]
+                images = [im.reshape(1, im.shape[0], im.shape[1]) for im in images]
+                out[suffix] = np.concatenate(images, 0)
+            else:
+                out[suffix] = np.load(filename[idy])
 
         return out
         
@@ -100,16 +101,9 @@ class BatchLoader(Dataset):
         self.unique_sample_prefix = filenames
         self.recon_projection_numbers = set(recon_projection_numbers)
 
-        if (not self.train):
-            self.length = len(filenames) / len(recon_projection_numbers)
-        else:
-            self.length = len(self.unique_sample_prefix)
+        self.length = len(self.unique_sample_prefix)
         pass
 
-    def SetTrainMode(self, train):
-        assert isinstance(train, bool), "Argument must be bool"
-        self.train = train
-        self._ParseRootdir()
 
     def __len__(self):
         return self.length

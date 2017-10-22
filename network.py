@@ -94,7 +94,7 @@ class Net(nn.Module):
 
         self.kernsize = 7
         self.chansize = 32
-        self.num_of_layers = 5
+        self.num_of_layers = 9
 
         self.convsModules = nn.ModuleList()
         self.psModules = nn.ModuleList()

@@ -105,6 +105,7 @@ def ProcessDirectory(dir):
         im = [img.reshape(1, img.shape[0], img.shape[1]) for img in im]
         im = np.concatenate(im, 0)
         im = FillHole3D(im)
+        im = np.array(im, dtype=np.uint8)
         result[i] = im
 
     for i in xrange(len(fns)):
@@ -125,7 +126,9 @@ def ShowMaskOnVisdom(dir):
         f1.sort()
         f2.sort()
 
+
         im1 = [np.load(dir + "/" + f) for f in f1]
+        im1 = [np.array(im, dtype=float) for im in im1]
         im1 = [im - im.min() for im in im1]
         im1 = [im / im.max() for im in im1]
         im2 = [np.load(dir + "/" + f) for f in f2]
@@ -139,7 +142,7 @@ def ShowMaskOnVisdom(dir):
 
 
 def main():
-    ShowMaskOnVisdom("../SIRT_Parallel_Slices/train")
+    ProcessDirectory("../SIRT_Parallel_Slices/train")
 
 if __name__ == '__main__':
     main()

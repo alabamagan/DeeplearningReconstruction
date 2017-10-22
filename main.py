@@ -53,7 +53,7 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
     #-------------------------------------
     for i in xrange(trainsteps):
         # index = np.random.randint(0, len(b))
-        sample = b(10)
+        sample = b(6)
         i2 = sample['064']
         i3 = sample['128']
         gt = sample['ori']
@@ -171,7 +171,7 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
             vis.images(im1, nrow=1, env="Results", win="ImWindow1")
             vis.images(im2, nrow=1, env="Results", win="ImWindow2")
             vis.images(im3, nrow=1, env="Results", win="ImWindow3")
-            vis.images(im6, nrow=1, env="Results", win="ImWindow4")
+            vis.images(im4, nrow=1, env="Results", win="ImWindow4")
             vis.images(im5, nrow=1, env="Results", win="ImWindow5")
 
             losslist = np.array(net.loss_list)
@@ -199,49 +199,70 @@ def evalNet(net, targets, plot=True):
     assert isinstance(net, network.Net), "Input net is incorrect!"
     assert targets.has_key('128') and targets.has_key('064'), \
             "Dictionary must contain data files with key '128' and '064'"
-    
-    if (plot):
-        fig = plt.figure(1, figsize=[13,6])
-        ax1 = fig.add_subplot(121)
-        ax2 = fig.add_subplot(122)
 
     net.eval()
 
-    offset = 30
-    i2 = targets['064']
-    i3 = targets['128']
-    last = i2.shape[0] % offset
+    offset = 5
+    oi2 = targets['064']
+    oi3 = targets['128']
+    last = oi2.shape[0] % offset
     if last == 0:
-        indexstart = np.arange(0, i2.shape[0], offset)
+        indexstart = np.arange(0, oi2.shape[0], offset)
     else:
-        indexstart = np.arange(0, i2.shape[0], offset)[0:-1]
+        indexstart = np.arange(0, oi2.shape[0], offset)[0:-1]
     indexstop = indexstart + offset
-    i2 = Variable(torch.from_numpy(i2))
-    i3 = Variable(torch.from_numpy(i3))
     output = None
     for i in xrange(len(indexstart)):
         bstart = indexstart[i]
         bstop = indexstop[i]
 
-        sl = net.forward(i2[bstart:bstop].cuda(), i3[bstart:bstop].cuda())
+        print bstart, bstop
+
+        i2 = Variable(torch.from_numpy(oi2[bstart:bstop]), requires_grad=False)
+        i3 = Variable(torch.from_numpy(oi3[bstart:bstop]), requires_grad=False)
+
+        if (a.usecuda):
+            i2 = i2.float().cuda()
+            i3 = i3.float().cuda()
+
+        sl = net.forward(i2, i3)
         if output is None:
             output = sl.data.cpu().numpy()
         else:
             output = np.concatenate((output, sl.data.cpu().numpy()), 0)
+        del sl, i2, i3
 
     if last != 0:
         if last == 1:
             bstart = indexstop[-1] - 1
             bstop = bstart + 2
-            sl = net.forward(i2[bstart:bstop].cuda(), i3[bstart:bstop].cuda())
+
+            i2 = Variable(torch.from_numpy(oi2[bstart:bstop]), requires_grad=False)
+            i3 = Variable(torch.from_numpy(oi3[bstart:bstop]), requires_grad=False)
+
+            if (a.usecuda):
+                i2 = i2.float().cuda()
+                i3 = i3.float().cuda()
+
+            sl = net.forward(i2, i3)
             output =np.concatenate((output, sl.data.cpu().numpy()[-1].reshape(
                                 [1, sl.data.size(1), sl.data.size(2)])), 0)
 
         else:
             bstart = indexstop[-1]
             bstop = bstart + last
-            sl = net.forward(i2[bstart:bstop].cuda(), i3[bstart:bstop].cuda())
+
+            i2 = Variable(torch.from_numpy(oi2[bstart:bstop]), requires_grad=False)
+            i3 = Variable(torch.from_numpy(oi3[bstart:bstop]), requires_grad=False)
+
+            if (a.usecuda):
+                i2 = i2.float().cuda()
+                i3 = i3.float().cuda()
+
+            sl = net.forward(i2, i3)
             output =np.concatenate((output, sl.data.cpu().numpy()), 0)
+
+        del sl, i2, i3
 
     # Calculate loss with np if ori exist
     loss = None
@@ -250,13 +271,6 @@ def evalNet(net, targets, plot=True):
                 np.sum(np.abs(targets['ori'] - targets['064']))
         logging.getLogger(__name__).log(20, "Calculated loss: %.05f"%loss)
 
-    if (plot):
-        for i in xrange(output.shape[0]):
-            plt.ion()
-            ax1.imshow(output[i], cmap='Greys_r')
-            ax2.imshow(targets['064'][i], cmap='Greys_r')
-            plt.draw()
-            plt.pause(0.2)
 
     return output, loss
 
@@ -285,6 +299,10 @@ def main(parserargs):
         logging.getLogger(__name__).log(20, "Find existing network, loading from %s..."%(networkpath))
         net = torch.load(networkpath)
 
+    if a.usecuda:
+        logging.getLogger(__name__).log(20, "Using CUDA")
+        net.cuda()
+
     #=========================
     # Train
     #---------------------
@@ -292,9 +310,6 @@ def main(parserargs):
         logging.getLogger(__name__).log(20, "Start training network with %d substeps..."%a.steps)
         assert os.path.isdir(a.input[0]), "Input directory does not exist!"
         b = BatchLoader(a.input[0])
-        if a.usecuda:
-            logging.getLogger(__name__).log(20, "Using CUDA")
-            net.cuda()
         net.zero_grad()
 
         # Parse params
@@ -305,21 +320,7 @@ def main(parserargs):
             trainparams = None
 
         l = train(net, b, trainsteps=a.steps, epoch=a.epoch, plot=a.plot, params=trainparams)
-        # if a.plot:
-        #     plt.plot(l)
-        #     plt.show()
-        # else:
-        #     print "Saving figure..."
-        #     logging.getLogger(__name__).log(10, "Saving figure...")
-        #     plt.switch_backend('Agg')
-        #     fig = plt.figure()
-        #     fig.set_tight_layout(True)
-        #     ax1 = fig.add_subplot(111)
-        #     ax1.set_title("Training network Epoch %03d"%(a.epoch + 1))
-        #     ax1.set_xlabel("Step")
-        #     ax1.set_ylabel("Loss")
-        #     ax1.plot(l)
-        #     fig.savefig("fig_E%03d.png"%(a.epoch))
+
 
     #==================================
     # Evaluation
@@ -335,7 +336,8 @@ def main(parserargs):
             assert os.path.isdir(a.input[0]), "Input directory does not exist!"
             logging.getLogger(__name__).log(10, "Start evaluation on directory %s"%a.input[0])
 
-            b = BatchLoader(a.input)
+            b = BatchLoader(a.input[0])
+            assert len(b) != 0, "Nothing in directory!"
 
             # Default output path
             if (a.output is None):
@@ -351,19 +353,17 @@ def main(parserargs):
 
             losslist = []
             for i in xrange(len(b)):
-                batchsize  = 30
-
                 images = b[i]
 
-                targets = {'032': images['032'], '064':images['064'], '128': images['128'], 'ori': images['ori']}
+                targets = {'064':images['064'], '128': images['128'], 'ori': images['ori']}
 
                 output, loss = evalNet(net, targets, a.plot)
 
 
-
                 from algorithm import NpToNii
-                NpToNii(output, outdir + fn + "_processed.nii.gz")
-                logging.getLogger(__name__).log(10, "Saving to " + outdir + fn + "_processed.nii.gz")
+                NpToNii(output, outdir + "/" + b.unique_sample_prefix[i] + "_processed.nii.gz")
+                NpToNii(images['128'], outdir + "/" + b.unique_sample_prefix[i] + "_1280.nii.gz")
+                logging.getLogger(__name__).log(10, "Saving to " + outdir + "/" + b.unique_sample_prefix[i] + "_processed.nii.gz")
                 losslist.append(loss)
 
             logging.getLogger(__name__).log(20, "=============== Eval E%03d End==============="%(a.epoch + 1))
