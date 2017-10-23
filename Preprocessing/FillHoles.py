@@ -99,7 +99,7 @@ def ProcessDirectory(dir):
     for i in xrange(len(fns)):
         print "Working on ", i
         fs = os.listdir(dir)
-        fs = fnmatch.filter(fs, fns[i] + "_*ori*")
+        fs = fnmatch.filter(fs, fns[i] + "_*128*")
         fs.sort()
         im = [np.load(dir + "/" + f) for f in fs]
         im = [img.reshape(1, img.shape[0], img.shape[1]) for img in im]
@@ -122,7 +122,7 @@ def ShowMaskOnVisdom(dir):
         print "Working on ", i
         fs = os.listdir(dir)
         f1 = fnmatch.filter(fs, fns[i] + "_*msk*")
-        f2 = fnmatch.filter(fs, fns[i] + "_*ori*")
+        f2 = fnmatch.filter(fs, fns[i] + "_*128*")
         f1.sort()
         f2.sort()
 
@@ -142,7 +142,7 @@ def ShowMaskOnVisdom(dir):
 
 
 def main():
-    ProcessDirectory("../SIRT_Parallel_Slices/train")
+    ShowMaskOnVisdom("../SIRT_Parallel_Slices/test")
 
 if __name__ == '__main__':
     main()

@@ -120,7 +120,7 @@ class Net(nn.Module):
         self.current_epoch = 0
         self.loss_list = []
 
-    def forward(self, x1, x2):
+    def forward(self, x1, x2, msk):
         """
         x2 should have better resolution
         :param x1:
@@ -139,17 +139,18 @@ class Net(nn.Module):
         x = self.d_36.forward(x)
         x = self.u.forward(x)
         x = x.squeeze()
-        s = x.data.size()
+        # s = x.data.size()
 
-        if self.CircularMask is None:
-            self.CircularMask = []
-            for i in xrange(s[-2]):
-                for j in xrange(s[-1]):
-                    if (i - s[-2]/2.) ** 2 + (j - s[-1] / 2.) ** 2 > ((s[-2]/2.)**2.) + 1:
-                        self.CircularMask.append([i,j])
-
-        for c in self.CircularMask:
-            x[:,c[0],c[1]] = 0
+        # if self.CircularMask is None:
+        #     self.CircularMask = []
+        #     for i in xrange(s[-2]):
+        #         for j in xrange(s[-1]):
+        #             if (i - s[-2]/2.) ** 2 + (j - s[-1] / 2.) ** 2 > ((s[-2]/2.)**2.) + 1:
+        #                 self.CircularMask.append([i,j])
+        #
+        # for c in self.CircularMask:
+        #     x[:,c[0],c[1]] = 0
+        x[msk] = 0
 
         x = x2 - x
         return x

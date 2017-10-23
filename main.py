@@ -57,15 +57,18 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
         i2 = sample['064']
         i3 = sample['128']
         gt = sample['ori']
+        mk = np.logical_not(sample['msk']) # inverted mask
+        mk = np.array(mk, dtype=np.uint8)
         gt = Variable(torch.from_numpy(gt)).float().cuda()
         i2 = Variable(torch.from_numpy(i2)).float()
         i3 = Variable(torch.from_numpy(i3)).float()
+        mk = torch.from_numpy(mk).cuda()
 
         # offset = 10
         # bstart = np.random.randint(0, i2.data.size()[0] - offset)
         # bstop = bstart + offset
 
-        output = net.forward(i2.cuda(), i3.cuda())
+        output = net.forward(i2.cuda(), i3.cuda(), mk)
         #=================================================
         # Add modules params to optimizer
         #-----------------------------------------------
@@ -146,8 +149,11 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
                          ", ".join([str(p.data[0]) for p in net.linearModules.parameters()]) + \
                          "</h3>"
 
+            # Setting display value range
             displayrangeIm = [-1000, 300]
             displayrangeDiff = [-15, 15]
+
+            # Normalization for display
             normIm = lambda inIm: inIm.clip(displayrangeIm[0], displayrangeIm[1])/\
                                   float(displayrangeIm[1] - displayrangeIm[0])
             normDiff = lambda inIm: inIm.clip(displayrangeDiff[0], displayrangeDiff[1])/\
@@ -215,8 +221,6 @@ def evalNet(net, targets, plot=True):
     for i in xrange(len(indexstart)):
         bstart = indexstart[i]
         bstop = indexstop[i]
-
-        print bstart, bstop
 
         i2 = Variable(torch.from_numpy(oi2[bstart:bstop]), requires_grad=False)
         i3 = Variable(torch.from_numpy(oi3[bstart:bstop]), requires_grad=False)
