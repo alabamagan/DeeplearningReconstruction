@@ -120,17 +120,17 @@ class Net(nn.Module):
         self.current_epoch = 0
         self.loss_list = []
 
-    def forward(self, x1, x2, msk):
+    def forward(self, x):
         """
         x2 should have better resolution
         :param x1:
         :param x2:
         :return:
         """
-        assert x1.is_cuda and x2.is_cuda, "Inputs are not in GPU!"
+        assert x.is_cuda, "Inputs are not in GPU!"
 
-        orix = x2 - x1
-        x = self.bnModules['init'].cuda()(orix.unsqueeze(1))
+        orix = x * 1
+        x = self.bnModules['init'].cuda()(x.unsqueeze(1))
 
         x = self.d_32.forward(x)
         for i in xrange(self.num_of_layers - 1):
@@ -139,20 +139,19 @@ class Net(nn.Module):
         x = self.d_36.forward(x)
         x = self.u.forward(x)
         x = x.squeeze()
-        # s = x.data.size()
+        x = x + orix
+        s = x.data.size()
 
-        # if self.CircularMask is None:
-        #     self.CircularMask = []
-        #     for i in xrange(s[-2]):
-        #         for j in xrange(s[-1]):
-        #             if (i - s[-2]/2.) ** 2 + (j - s[-1] / 2.) ** 2 > ((s[-2]/2.)**2.) + 1:
-        #                 self.CircularMask.append([i,j])
-        #
-        # for c in self.CircularMask:
-        #     x[:,c[0],c[1]] = 0
-        x[msk] = 0
+        if self.CircularMask is None:
+            self.CircularMask = []
+            for i in xrange(s[-2]):
+                for j in xrange(s[-1]):
+                    if (i - s[-2]/2.) ** 2 + (j - s[-1] / 2.) ** 2 > ((s[-2]/2.)**2.) + 1:
+                        self.CircularMask.append([i,j])
 
-        x = x2 - x
+        for c in self.CircularMask:
+            x[:,c[0],c[1]] = 0
+
         return x
 
 

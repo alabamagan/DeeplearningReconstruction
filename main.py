@@ -57,18 +57,25 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
         i2 = sample['064']
         i3 = sample['128']
         gt = sample['ori']
-        mk = np.logical_not(sample['msk']) # inverted mask
+        # mk = np.logical_not(sample['msk']) # inverted mask
+        mk = sample['msk']
         mk = np.array(mk, dtype=np.uint8)
-        gt = Variable(torch.from_numpy(gt)).float().cuda()
+        gt = Variable(torch.from_numpy(gt)).float()
         i2 = Variable(torch.from_numpy(i2)).float()
         i3 = Variable(torch.from_numpy(i3)).float()
-        mk = torch.from_numpy(mk).cuda()
+        mk = torch.from_numpy(mk)
+
+        if (a.usecuda):
+            gt = gt.cuda()
+            i2 = i2.cuda()
+            i3 = i3.cuda()
+            mk = mk.cuda()
 
         # offset = 10
         # bstart = np.random.randint(0, i2.data.size()[0] - offset)
         # bstop = bstart + offset
 
-        output = net.forward(i2.cuda(), i3.cuda(), mk)
+        output = net.forward(i3.cuda())
         #=================================================
         # Add modules params to optimizer
         #-----------------------------------------------
@@ -130,7 +137,10 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
                 LogPrint(">>>>>>>>>>>>>>> Pre-train Phase End <<<<<<<<<<<<<<<<<")
                 torch.save(net.state_dict(), "pretrain_checkpoint_E%03d"%(epoch + 1))
 
-        loss = criterion((output.squeeze()), (gt)) / normalize(i3.float().cuda(), gt)
+
+
+
+        loss = criterion((output.squeeze())[mk], (gt)[mk]) / normalize(i3[mk], gt[mk])
         print "[Step %04d] Loss: %.010f"%(i, loss.data[0])
         logging.getLogger(__name__).log(20, "[Step %04d] Loss: %.010f"%(i, loss.data[0]))
         net.current_step += 1
@@ -211,12 +221,15 @@ def evalNet(net, targets, plot=True):
     offset = 5
     oi2 = targets['064']
     oi3 = targets['128']
+    mk = targets['msk']
     last = oi2.shape[0] % offset
     if last == 0:
         indexstart = np.arange(0, oi2.shape[0], offset)
     else:
         indexstart = np.arange(0, oi2.shape[0], offset)[0:-1]
+
     indexstop = indexstart + offset
+
     output = None
     for i in xrange(len(indexstart)):
         bstart = indexstart[i]
@@ -229,7 +242,7 @@ def evalNet(net, targets, plot=True):
             i2 = i2.float().cuda()
             i3 = i3.float().cuda()
 
-        sl = net.forward(i2, i3)
+        sl = net.forward(i3)
         if output is None:
             output = sl.data.cpu().numpy()
         else:
@@ -248,7 +261,7 @@ def evalNet(net, targets, plot=True):
                 i2 = i2.float().cuda()
                 i3 = i3.float().cuda()
 
-            sl = net.forward(i2, i3)
+            sl = net.forward(i3)
             output =np.concatenate((output, sl.data.cpu().numpy()[-1].reshape(
                                 [1, sl.data.size(1), sl.data.size(2)])), 0)
 
@@ -263,7 +276,7 @@ def evalNet(net, targets, plot=True):
                 i2 = i2.float().cuda()
                 i3 = i3.float().cuda()
 
-            sl = net.forward(i2, i3)
+            sl = net.forward(i3)
             output =np.concatenate((output, sl.data.cpu().numpy()), 0)
 
         del sl, i2, i3
@@ -271,9 +284,9 @@ def evalNet(net, targets, plot=True):
     # Calculate loss with np if ori exist
     loss = None
     if (targets.has_key('ori')):
-        loss =  np.sum(np.abs(targets['ori'] - output)) / \
-                np.sum(np.abs(targets['ori'] - targets['064']))
-        logging.getLogger(__name__).log(20, "Calculated loss: %.05f"%loss)
+        loss =  np.sum(np.abs(targets['ori'] - output)[mk > 0]) / \
+                np.sum(np.abs(targets['ori'] - targets['064'])[mk > 0])
+        LogPrint("Calculated loss: %.05f"%loss, 20)
 
 
     return output, loss
@@ -359,14 +372,12 @@ def main(parserargs):
             for i in xrange(len(b)):
                 images = b[i]
 
-                targets = {'064':images['064'], '128': images['128'], 'ori': images['ori']}
-
-                output, loss = evalNet(net, targets, a.plot)
+                output, loss = evalNet(net, images, a.plot)
 
 
                 from algorithm import NpToNii
                 NpToNii(output, outdir + "/" + b.unique_sample_prefix[i] + "_processed.nii.gz")
-                NpToNii(images['128'], outdir + "/" + b.unique_sample_prefix[i] + "_1280.nii.gz")
+                NpToNii(images['128'], outdir + "/" + b.unique_sample_prefix[i] + "_128.nii.gz")
                 logging.getLogger(__name__).log(10, "Saving to " + outdir + "/" + b.unique_sample_prefix[i] + "_processed.nii.gz")
                 losslist.append(loss)
 
