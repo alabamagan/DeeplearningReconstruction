@@ -12,6 +12,7 @@ def ParseRootdir(dir):
     -----------
       Process the root dir and identify unique sample
 
+    :param str dir
     :return:
     """
 
@@ -24,6 +25,16 @@ def ParseRootdir(dir):
     return filenames
 
 def FillHole2D(array, mask=True):
+    """
+    Description
+    -----------
+      Fill holes in 2D space instead of 3D so holes connected to the image boundary
+      will still be filled.
+
+    :param np.ndarray array: 2D array to be filled, assume (H, W)
+    :param bool mask:        Use circular mask or not
+    :return:
+    """
     assert isinstance(array, np.ndarray), "Input has to be array"
     assert array.ndim == 2, "Input has to be 2D"
 
@@ -58,8 +69,8 @@ def FillHole3D(array, mask=True):
     -----------
       Assume input array is in shape of [B, H, W]
 
-    :param np.ndarray array:
-    :param bool mask:
+    :param np.ndarray array: 3D array to be filled
+    :param bool mask:        Use circular mask or not
     :return:
     """
     assert isinstance(array, np.ndarray), "Input has to be array"
@@ -74,6 +85,19 @@ def FillHole3D(array, mask=True):
     return np.concatenate(im, 0)
 
 def SaveImage(array, prefix):
+    """
+    Description
+    -----------
+      Save the numpy image assuming dimension is (B, H, W) along the batch (i.e. slice)
+      direction. Each slices are saved as separated .npy files with the format
+      @prefix + "_msk_S%03d"%slicenum
+
+    :param np.ndarray array: Array to be saved, assume (B, H, W)
+    :param str prefix:       Prefix of the saved files
+    :return:
+    """
+
+
     assert isinstance(array, np.ndarray)
     assert isinstance(prefix, str)
     assert array.ndim == 3, "Only support 3D images (B, H, W)"
@@ -85,8 +109,9 @@ def ProcessDirectory(dir):
     """
     Description
     -----------
+      Process all the npy files with fill hole methods.
 
-    :param dir:
+    :param str dir:
     :return:
     """
 
@@ -99,7 +124,7 @@ def ProcessDirectory(dir):
     for i in xrange(len(fns)):
         print "Working on ", i
         fs = os.listdir(dir)
-        fs = fnmatch.filter(fs, fns[i] + "_*128*")
+        fs = fnmatch.filter(fs, fns[i] + "*_128_*")
         fs.sort()
         im = [np.load(dir + "/" + f) for f in fs]
         im = [img.reshape(1, img.shape[0], img.shape[1]) for img in im]
@@ -113,6 +138,14 @@ def ProcessDirectory(dir):
 
 
 def ShowMaskOnVisdom(dir):
+    """
+    Description
+    -----------
+      Show the result in visdom server (env = "main")
+
+    :param dir:
+    :return:
+    """
     assert os.path.isdir(dir), "Directory doesn't exist"
 
     fns = ParseRootdir(dir)
@@ -121,8 +154,8 @@ def ShowMaskOnVisdom(dir):
     for i in xrange(len(fns)):
         print "Working on ", i
         fs = os.listdir(dir)
-        f1 = fnmatch.filter(fs, fns[i] + "_*msk*")
-        f2 = fnmatch.filter(fs, fns[i] + "_*128*")
+        f1 = fnmatch.filter(fs, fns[i] + "*_msk_*")
+        f2 = fnmatch.filter(fs, fns[i] + "*_128_*")
         f1.sort()
         f2.sort()
 
