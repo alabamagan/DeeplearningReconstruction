@@ -19,6 +19,10 @@ from dataloader import BatchLoader
 logging.getLogger(__name__).setLevel(10)
 vis = visdom.Visdom(port=80, server='http://137.189.141.212')
 
+#============================================
+# Target key
+targetkey = '256'
+
 def LogPrint(msg, level=20):
     logging.getLogger(__name__).log(level, msg)
     print msg
@@ -54,26 +58,19 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
     for i in xrange(trainsteps):
         # index = np.random.randint(0, len(b))
         sample = b(6)
-        i2 = sample['064']
-        i3 = sample['128']
+        i3 = sample[targetkey]
         gt = sample['ori']
         # mk = np.logical_not(sample['msk']) # inverted mask
         mk = sample['msk']
         mk = np.array(mk, dtype=np.uint8)
         gt = Variable(torch.from_numpy(gt)).float()
-        i2 = Variable(torch.from_numpy(i2)).float()
         i3 = Variable(torch.from_numpy(i3)).float()
         mk = torch.from_numpy(mk)
 
         if (a.usecuda):
             gt = gt.cuda()
-            i2 = i2.cuda()
             i3 = i3.cuda()
             mk = mk.cuda()
-
-        # offset = 10
-        # bstart = np.random.randint(0, i2.data.size()[0] - offset)
-        # bstop = bstart + offset
 
         output = net.forward(i3.cuda())
         #=================================================
@@ -132,7 +129,7 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
                     loss = criterion((output.squeeze()), (gt)) / normalize(i3.float().cuda(), gt)
                     loss.backward()
                     optimizer.step()
-                    output = net.forward(i2.cuda(), i3.cuda())
+                    output = net.forward(i3.cuda())
                     LogPrint("[Pretrain %04d] Loss: %.010f"%(j, loss.data[0]))
                 LogPrint(">>>>>>>>>>>>>>> Pre-train Phase End <<<<<<<<<<<<<<<<<")
                 torch.save(net.state_dict(), "pretrain_checkpoint_E%03d"%(epoch + 1))
@@ -169,26 +166,23 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
             normDiff = lambda inIm: inIm.clip(displayrangeDiff[0], displayrangeDiff[1])/\
                                   float(displayrangeDiff[1] - displayrangeDiff[0])
 
-            im1 = (i3.squeeze().unsqueeze(1).data.cpu() -
-                   i2.squeeze().unsqueeze(1).data.cpu()).numpy() # Original diff
-            im2 = (output.squeeze().unsqueeze(1).data.cpu() -
-                   i3.squeeze().unsqueeze(1).data.cpu()).numpy() # Processed Diff
-            im3 = (gt.squeeze().unsqueeze(1).data.cpu() -
-                   i3.squeeze().unsqueeze(1).data.cpu()).numpy() # Ground True Diff
-            im4 = (i3.squeeze().unsqueeze(1).data.cpu()).numpy() # Original Im
-            im5 = (output.squeeze().unsqueeze(1).data.cpu()).numpy() # Processed truth Im
-            im6 = im2 - im3 # Processed to ground truth diff
-            im1, im2, im3, im6 = [normDiff(im) for im in [im1, im2, im3, im6]]
-            im4, im5 = [normIm(im) for im in [im4, im5]]
-            im1, im2, im3, im4, im5 = [im + abs(im.min()) for im in [im1, im2, im3, im4, im5]]
+
+            ims = []
+            ims.append((output.squeeze().unsqueeze(1).data.cpu() -
+                        i3.squeeze().unsqueeze(1).data.cpu()).numpy()) # Processed True Diff
+            ims.append((gt.squeeze().unsqueeze(1).data.cpu() -
+                        i3.squeeze().unsqueeze(1).data.cpu()).numpy()) # Ground True Diff
+            ims.append(ims[1] - ims[0])                                # Difference
+            ims.append((i3.squeeze().unsqueeze(1).data.cpu()).numpy()) # Original Image
+            ims.append((output.squeeze().unsqueeze(1).data.cpu()).numpy()) # Processed Image
+
+            ims = [normDiff(im) for im in ims[0:3]] + [normIm(im) for im in ims[3:5]]
+            ims = [im - im.min() for im in ims]
+            ims = [im / im.max() for im in ims]
+
 
             vis.text(paramstext, env="Results", win="ParamsWindow")
-
-            vis.images(im1, nrow=1, env="Results", win="ImWindow1")
-            vis.images(im2, nrow=1, env="Results", win="ImWindow2")
-            vis.images(im3, nrow=1, env="Results", win="ImWindow3")
-            vis.images(im4, nrow=1, env="Results", win="ImWindow4")
-            vis.images(im5, nrow=1, env="Results", win="ImWindow5")
+            [vis.images(ims[i], nrow=1, env="Results", win="ImWindow%i"%i) for i in xrange(len(ims))]
 
             losslist = np.array(net.loss_list)
             vis.line(losslist, np.arange(len(net.loss_list)), env="Plots", win="TrainingLoss")
@@ -199,7 +193,7 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
             torch.save(net, "checkpoint_E%03d"%(epoch + 1))
 
         # Free some meory
-        del sample, i2, i3, gt
+        del sample, i3, gt
         gc.collect()
 
     print "======================= End train epoch %03d ======================="%(epoch + 1)
@@ -375,7 +369,7 @@ def main(parserargs):
                 output, loss = evalNet(net, images, a.plot)
 
 
-                from algorithm import NpToNii
+                from Algorithm.IO import NpToNii
                 NpToNii(output, outdir + "/" + b.unique_sample_prefix[i] + "_processed.nii.gz")
                 NpToNii(images['128'], outdir + "/" + b.unique_sample_prefix[i] + "_128.nii.gz")
                 logging.getLogger(__name__).log(10, "Saving to " + outdir + "/" + b.unique_sample_prefix[i] + "_processed.nii.gz")
@@ -399,7 +393,7 @@ def main(parserargs):
             if (a.output.find('.npy') > 0):
                 np.save(a.output, output)
             elif (a.output.find('.nii')) > 0:
-                from algorithm import NpToNii
+                from Algorithm.Utils import NpToNii
                 NpToNii(output, a.output)
 
         else:
