@@ -21,7 +21,7 @@ vis = visdom.Visdom(port=80, server='http://137.189.141.212')
 
 #============================================
 # Target key
-targetkey = '256'
+targetkey = '064'
 
 def LogPrint(msg, level=20):
     logging.getLogger(__name__).log(level, msg)
@@ -207,20 +207,19 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
 def evalNet(net, targets, plot=True):
     assert isinstance(targets, dict), "Target should be parsed as dictionaries!"
     assert isinstance(net, network.Net), "Input net is incorrect!"
-    assert targets.has_key('128') and targets.has_key('064'), \
-            "Dictionary must contain data files with key '128' and '064'"
+    assert targets.has_key(targetkey) and targets.has_key('ori'), \
+            "Dictionary must contain data files with key %s and ori"%targetkey
 
     net.eval()
 
     offset = 5
-    oi2 = targets['064']
-    oi3 = targets['128']
+    oi3 = targets[targetkey]
     mk = targets['msk']
-    last = oi2.shape[0] % offset
+    last = oi3.shape[0] % offset
     if last == 0:
-        indexstart = np.arange(0, oi2.shape[0], offset)
+        indexstart = np.arange(0, oi3.shape[0], offset)
     else:
-        indexstart = np.arange(0, oi2.shape[0], offset)[0:-1]
+        indexstart = np.arange(0, oi3.shape[0], offset)[0:-1]
 
     indexstop = indexstart + offset
 
@@ -229,11 +228,9 @@ def evalNet(net, targets, plot=True):
         bstart = indexstart[i]
         bstop = indexstop[i]
 
-        i2 = Variable(torch.from_numpy(oi2[bstart:bstop]), requires_grad=False)
         i3 = Variable(torch.from_numpy(oi3[bstart:bstop]), requires_grad=False)
 
         if (a.usecuda):
-            i2 = i2.float().cuda()
             i3 = i3.float().cuda()
 
         sl = net.forward(i3)
@@ -241,18 +238,16 @@ def evalNet(net, targets, plot=True):
             output = sl.data.cpu().numpy()
         else:
             output = np.concatenate((output, sl.data.cpu().numpy()), 0)
-        del sl, i2, i3
+        del sl, i3
 
     if last != 0:
         if last == 1:
             bstart = indexstop[-1] - 1
             bstop = bstart + 2
 
-            i2 = Variable(torch.from_numpy(oi2[bstart:bstop]), requires_grad=False)
             i3 = Variable(torch.from_numpy(oi3[bstart:bstop]), requires_grad=False)
 
             if (a.usecuda):
-                i2 = i2.float().cuda()
                 i3 = i3.float().cuda()
 
             sl = net.forward(i3)
@@ -263,24 +258,23 @@ def evalNet(net, targets, plot=True):
             bstart = indexstop[-1]
             bstop = bstart + last
 
-            i2 = Variable(torch.from_numpy(oi2[bstart:bstop]), requires_grad=False)
             i3 = Variable(torch.from_numpy(oi3[bstart:bstop]), requires_grad=False)
 
             if (a.usecuda):
-                i2 = i2.float().cuda()
                 i3 = i3.float().cuda()
 
             sl = net.forward(i3)
             output =np.concatenate((output, sl.data.cpu().numpy()), 0)
 
-        del sl, i2, i3
+        del sl, i3
 
     # Calculate loss with np if ori exist
     loss = None
     if (targets.has_key('ori')):
-        loss =  np.sum(np.abs(targets['ori'] - output)[mk > 0]) / \
-                np.sum(np.abs(targets['ori'] - targets['064'])[mk > 0])
+        loss =  np.sum(np.abs(targets['ori'] - output)[mk > 0]**2) / \
+                np.sum(np.abs(targets['ori'] - targets[targetkey])[mk > 0]**2)
         LogPrint("Calculated loss: %.05f"%loss, 20)
+
 
 
     return output, loss
@@ -362,21 +356,25 @@ def main(parserargs):
             if not os.path.isdir(outdir):
                 os.makedirs(outdir)
 
+            ostream = file(outdir + "/results.txt", 'w')
             losslist = []
             for i in xrange(len(b)):
                 images = b[i]
+                name = b.unique_sample_prefix[i]
 
                 output, loss = evalNet(net, images, a.plot)
-
+                ostream.write(name + " " + str(loss) + "\r\n")
 
                 from Algorithm.IO import NpToNii
                 NpToNii(output, outdir + "/" + b.unique_sample_prefix[i] + "_processed.nii.gz")
-                NpToNii(images['128'], outdir + "/" + b.unique_sample_prefix[i] + "_128.nii.gz")
+                NpToNii(images[targetkey], outdir + "/" + b.unique_sample_prefix[i] + "_%s.nii.gz"%targetkey)
                 logging.getLogger(__name__).log(10, "Saving to " + outdir + "/" + b.unique_sample_prefix[i] + "_processed.nii.gz")
                 losslist.append(loss)
 
             logging.getLogger(__name__).log(20, "=============== Eval E%03d End==============="%(a.epoch + 1))
             logging.getLogger(__name__).log(20, "Average loss: %.05f"%(np.mean(losslist)))
+            ostream.write("Average loss: %.05f"%(np.mean(losslist)))
+            ostream.close()
 
 
         elif len(a.input) == 2:
