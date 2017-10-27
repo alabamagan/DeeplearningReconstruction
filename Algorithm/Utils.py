@@ -178,3 +178,39 @@ def RemoveSpeicfiedSlices(dir, spec):
         process.wait()
 
     pass
+
+
+def CheckDir(dir):
+    """
+    Description
+    -----------
+      Check if directory has the correct format
+
+    :param str dir:
+    :return:
+    """
+
+    assert os.path.isdir(dir), "Directory doesn't exist!"
+
+    files = os.listdir(dir)
+    files = fnmatch.filter(files, "*.npy")
+    files.sort()
+
+    uniquesamples = list(set([ff.split('_')[0] for ff in files]))
+    suffix = list(set([ff.split('_')[1] for ff in files]))
+    suffix.sort()
+    print suffix
+
+    for f in uniquesamples:
+        slices = []
+        for suf in suffix:
+            fs = fnmatch.filter(files, f + "_" + suf + "_*")
+            slices.append(str(len(fs)))
+        print f + ": " + ",".join(slices)
+
+
+
+
+
+
+
