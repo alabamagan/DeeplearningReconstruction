@@ -17,11 +17,12 @@ from dataloader import BatchLoader
 #============================================
 # Prepare global logger
 logging.getLogger(__name__).setLevel(10)
-vis = visdom.Visdom(port=80, server='http://137.189.141.212')
+vis = visdom.Visdom(server='http://223.255.146.2')
 
 #============================================
 # Target key
-targetkey = '064'
+global targetkey
+targetkey=None
 
 def LogPrint(msg, level=20):
     logging.getLogger(__name__).log(level, msg)
@@ -41,6 +42,8 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
     :param dict         params:     Not supported yet
     :return:
     """
+    global targetkey
+
     net.train()
     net.current_epoch = epoch
 
@@ -57,11 +60,14 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
     #-------------------------------------
     for i in xrange(trainsteps):
         # index = np.random.randint(0, len(b))
-        sample = b(6)
+        sample = b(5)
         i3 = sample[targetkey]
         gt = sample['ori']
-        # mk = np.logical_not(sample['msk']) # inverted mask
-        mk = sample['msk']
+
+        if a.invertmask:
+            mk = np.logical_not(sample['msk']) # inverted mask
+        else:
+            mk = sample['msk']
         mk = np.array(mk, dtype=np.uint8)
         gt = Variable(torch.from_numpy(gt)).float()
         i3 = Variable(torch.from_numpy(i3)).float()
@@ -116,26 +122,6 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
             for pg in optimizer.param_groups:
                pg['lr'] = pg['lr'] * np.exp(-i * float(a.epoch)  * a.decay / float(trainsteps))
 
-        #============================================
-        # Pre-train phase
-        #-------------------------------------
-        if (i == 0 and epoch == 0 and a.pretrain):
-            if (os.path.isfile("pretrain_checkpoint_E%03d"%(epoch + 1))):
-                net.load_state_dict(torch.load("pretrain_checkpoint_E%03d"%(epoch + 1)))
-                LogPrint("Loading pretrain dict")
-            else:
-                LogPrint(">>>>>>>>>>>>>>> Pre-train Phase <<<<<<<<<<<<<<<<<")
-                for j in xrange(500):
-                    loss = criterion((output.squeeze()), (gt)) / normalize(i3.float().cuda(), gt)
-                    loss.backward()
-                    optimizer.step()
-                    output = net.forward(i3.cuda())
-                    LogPrint("[Pretrain %04d] Loss: %.010f"%(j, loss.data[0]))
-                LogPrint(">>>>>>>>>>>>>>> Pre-train Phase End <<<<<<<<<<<<<<<<<")
-                torch.save(net.state_dict(), "pretrain_checkpoint_E%03d"%(epoch + 1))
-
-
-
 
         loss = criterion((output.squeeze())[mk], (gt)[mk]) / normalize(i3[mk], gt[mk])
         print "[Step %04d] Loss: %.010f"%(i, loss.data[0])
@@ -157,7 +143,7 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
                          "</h3>"
 
             # Setting display value range
-            displayrangeIm = [-1000, 300]
+            displayrangeIm = [-1000, 400]
             displayrangeDiff = [-15, 15]
 
             # Normalization for display
@@ -182,7 +168,7 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
 
 
             vis.text(paramstext, env="Results", win="ParamsWindow")
-            [vis.images(ims[i], nrow=1, env="Results", win="ImWindow%i"%i) for i in xrange(len(ims))]
+            [vis.images(ims[k +3], nrow=1, env="Results", win="ImWindow%i"%k) for k in xrange(len(ims) - 3)]
 
             losslist = np.array(net.loss_list)
             vis.line(losslist, np.arange(len(net.loss_list)), env="Plots", win="TrainingLoss")
@@ -205,22 +191,30 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
     return net.loss_list
 
 def evalNet(net, targets, plot=True):
+    global targetkey
+
+    #========================================
+    # Error check
+    #---------------------------------------
     assert isinstance(targets, dict), "Target should be parsed as dictionaries!"
     assert isinstance(net, network.Net), "Input net is incorrect!"
     assert targets.has_key(targetkey) and targets.has_key('ori'), \
             "Dictionary must contain data files with key %s and ori"%targetkey
 
+    # Set network to evaluation mode
     net.eval()
 
+    # Set the batch number the network can take without overflowing GPU memory
     offset = 5
     oi3 = targets[targetkey]
     mk = targets['msk']
+
+    # Calculate the interval indexes
     last = oi3.shape[0] % offset
     if last == 0:
         indexstart = np.arange(0, oi3.shape[0], offset)
     else:
         indexstart = np.arange(0, oi3.shape[0], offset)[0:-1]
-
     indexstop = indexstart + offset
 
     output = None
@@ -229,7 +223,6 @@ def evalNet(net, targets, plot=True):
         bstop = indexstop[i]
 
         i3 = Variable(torch.from_numpy(oi3[bstart:bstop]), requires_grad=False)
-
         if (a.usecuda):
             i3 = i3.float().cuda()
 
@@ -238,6 +231,8 @@ def evalNet(net, targets, plot=True):
             output = sl.data.cpu().numpy()
         else:
             output = np.concatenate((output, sl.data.cpu().numpy()), 0)
+
+        # Free some GRAM
         del sl, i3
 
     if last != 0:
@@ -266,6 +261,7 @@ def evalNet(net, targets, plot=True):
             sl = net.forward(i3)
             output =np.concatenate((output, sl.data.cpu().numpy()), 0)
 
+        # Free some GRAM
         del sl, i3
 
     # Calculate loss with np if ori exist
@@ -280,6 +276,9 @@ def evalNet(net, targets, plot=True):
     return output, loss
 
 def main(parserargs):
+    global targetkey
+    targetkey = parserargs.targetkey
+
     logging.getLogger(__name__).log(20, "Start running batch with options: %s"%parserargs)
 
     #=========================
@@ -365,6 +364,7 @@ def main(parserargs):
                 output, loss = evalNet(net, images, a.plot)
                 ostream.write(name + " " + str(loss) + "\r\n")
 
+                # Save the output
                 from Algorithm.IO import NpToNii
                 NpToNii(output, outdir + "/" + b.unique_sample_prefix[i] + "_processed.nii.gz")
                 NpToNii(images[targetkey], outdir + "/" + b.unique_sample_prefix[i] + "_%s.nii.gz"%targetkey)
@@ -425,6 +425,15 @@ if __name__ == '__main__':
                         help="If specified, all the messages will be written to the specified file.")
     parser.add_argument("--pretrain", dest='pretrain', action='store_true', default=False,
                         help="Use a set of randomly drawn sample from the training data to do 200 steps pretrain")
+    parser.add_argument("--targetkey", dest='targetkey', action='store', default='128', type=str,
+                        help="The projection unique identification key. Default to be '128'")
+    parser.add_argument("--invert-mask", dest='invertmask', action='store_true', default=False,
+                        help="Invert the mask for loss function. "
+                             "Useful for learning background noise suppression. Note that this is best used with"
+                             "alternative loss function.")
+    parser.add_argument("--vacinity-loss", dest='vacloss', action='store_true', default=False,
+                        help="Use alternative loss function.")
+
     a = parser.parse_args()
 
     if (a.log is None):
