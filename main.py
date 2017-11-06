@@ -12,6 +12,7 @@ import gc
 import logging
 import argparse
 import visdom
+import SSIMLoss
 from dataloader import BatchLoader
 
 #============================================
@@ -53,6 +54,7 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
     criterion.size_average = True
     normalize = torch.nn.MSELoss().cuda()
     normalize.size_average = True
+    ssim = SSIMLoss.SSIM(window_size=11)
 
 
     #============================================
@@ -123,7 +125,15 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
                pg['lr'] = pg['lr'] * np.exp(-i * float(a.epoch)  * a.decay / float(trainsteps))
 
 
-        loss = criterion((output.squeeze())[mk], (gt)[mk]) / normalize(i3[mk], gt[mk])
+        if a.ssimloss:
+            mk = Variable(mk.float())
+            if (a.usecuda):
+                mk = mk.cuda()
+
+            loss = ssim((output.squeeze() * mk).unsqueeze(1), (gt * mk).unsqueeze(1))
+            loss = 1 - loss + criterion((output.squeeze())*mk, (gt)*mk) / normalize(i3 * mk, gt * mk)
+        else:
+            loss = criterion((output.squeeze())[mk], (gt)[mk]) / normalize(i3[mk], gt[mk])
         print "[Step %04d] Loss: %.010f"%(i, loss.data[0])
         logging.getLogger(__name__).log(20, "[Step %04d] Loss: %.010f"%(i, loss.data[0]))
         net.current_step += 1
@@ -431,7 +441,7 @@ if __name__ == '__main__':
                         help="Invert the mask for loss function. "
                              "Useful for learning background noise suppression. Note that this is best used with"
                              "alternative loss function.")
-    parser.add_argument("--vacinity-loss", dest='vacloss', action='store_true', default=False,
+    parser.add_argument("--ssim-loss", dest='ssimloss', action='store_true', default=False,
                         help="Use alternative loss function.")
 
     a = parser.parse_args()
