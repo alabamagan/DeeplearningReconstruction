@@ -1,5 +1,7 @@
 import numpy as np
-import gc
+import fnmatch
+import os, sys, gc
+import SimpleITK as sitk
 
 def SliceImage(im, dim):
     """
@@ -107,25 +109,115 @@ def NpToNii(array, outfilename):
     gc.collect()
     pass
 
-def ConvertAllNpyToNii(directory, output = 'output'):
+def ConvertAllNpyToNii(directory, output = 'output', selectprojection=None):
+    """
+    Description
+    -----------
+      Convert all numpy saved slice into nii.gz. The numpy data should have the naming
+      format [prefix]_[projection]_S[03d slice number].npy. This method uses the
+      batch loader from pytorch.
+
+    :param directory:
+    :param output:
+    :return:
+    """
     import multiprocessing as mp
     import os
 
     assert os.path.isdir(directory), "No such directory"
-    if not os.path.isdir(directory + "/output"):
-        os.makedirs(directory + "/output")
+    if not os.path.isdir(output):
+        os.mkdir(output)
 
     ps = []
-    pool = mp.Pool(processes=8)
-    fs = os.listdir(directory)
-    for fn in fs:
-        if (fn.find('.npy') != -1):
-            tar = directory + "/" + fn
-            dst = directory + "/" + output + "/" + fn.replace('.npy', '.nii.gz')
-            print "Working on ", tar
-            p = pool.apply_async(NpToNii, args=[np.load(tar), dst])
+    pool = mp.Pool(processes=4)
+    from dataloader import BatchLoader
+    b = BatchLoader(os.path.abspath(directory))
+
+    for i in xrange(len(b)):
+        if selectprojection is None:
+            for key in b.recon_projection_numbers:
+                dst = os.path.abspath(output) + "/" + b.unique_sample_prefix[i] + "_%s.nii.gz"%key
+                p = pool.apply_async(NpToNii, args=[b[i][key], dst])
+                ps.append(p)
+        elif isinstance(selectprojection, list):
+            for key in selectprojection:
+                dst = os.path.abspath(output) + "/" + b.unique_sample_prefix[i] + "_%s.nii.gz"%key
+                p = pool.apply_async(NpToNii, args=[b[i][key], dst])
+                ps.append(p)
+        else:
+            dst = os.path.abspath(output) + "/" + b.unique_sample_prefix[i] + "_%s.nii.gz"%selectprojection
+            p = pool.apply_async(NpToNii, args=[b[i][selectprojection], dst])
             ps.append(p)
 
     for p in ps:
         p.wait()
         del p
+
+
+class NiiDataLoader(object):
+    def __init__(self, rootdir, tonumpy = False):
+        super(NiiDataLoader, self).__init__()
+        self._rootdir = os.path.abspath(rootdir)
+        self._ParseRootDir()
+        self._tonumpy = tonumpy
+        self._cache = {}
+
+    def __getitem__(self, item):
+        """
+
+        :param item:
+        :return:
+        """
+        assert item < len(self.unique_prefix), "Exceed length!"
+
+        if self._cache.has_key(item):
+            return self._cache[item]
+
+        d = {}
+        for keys in self.types:
+            p = self._rootdir + "/" + self.unique_prefix[item] + "_%s.nii.gz"%keys
+            if not(os.path.isfile(p)):
+                continue
+
+            im = sitk.ReadImage(p)
+            if (self._tonumpy):
+                temp = im
+                im = sitk.GetArrayFromImage(temp)
+                del temp
+            d[keys] = im
+        self.Cache(item, d)
+        return d
+
+    def __len__(self):
+        return len(self.unique_prefix)
+
+
+    def Cache(self, item, obj):
+        if (sys.getsizeof(self._cache) > 1e6):
+            temp =  self._cache.pop()
+            del temp
+        self._cache[item] = obj
+
+    def PrintLoadable(self):
+        for i in xrange(self.__len__()):
+            pref = self.unique_prefix[i]
+            suff = []
+            for keys in self.types:
+                if (os.path.isfile(self._rootdir + "/" + pref + "_%s.nii.gz"%keys)):
+                    suff.append(keys)
+            print pref, ": ", suff
+        print "Length: ", self.__len__()
+
+    def _ParseRootDir(self):
+        assert os.path.isdir(self._rootdir)
+
+        files = os.listdir(self._rootdir)
+        files = fnmatch.filter(files, "*.nii.gz")
+
+        prefix = [ff.split('_')[0] for ff in files]
+        types = [ff.split('_')[1].replace('.nii.gz', '') for ff in files]
+        self.unique_prefix = list(set(prefix))
+        self.types = list(set(types))
+
+        self.unique_prefix.sort()
+        self.types.sort()

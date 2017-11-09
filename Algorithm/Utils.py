@@ -5,7 +5,7 @@ import numpy as np
 import sys
 from dataloader import BatchLoader
 import os
-vis = visdom.Visdom(port=80)
+vis = visdom.Visdom(server="http://137.189.141.212", port=80)
 
 __all__ = ["ShowImages", "CreateTrainingSamples", "RemoveSpeicfiedSlices"]
 
@@ -14,7 +14,7 @@ def MoveFiles(prefix, fn, postix):
     os.system("mv " + prefix + "/" + fn + "* " + prefix + "/" + postix)
     return
 
-def ShowImages(*args):
+def ShowImages(dir, pattern=None):
     """
     Description
     -----------
@@ -23,12 +23,13 @@ def ShowImages(*args):
     :param args:
     :return:
     """
-    dir = args[0][1]
 
     disrange = [-1000, 400]
 
     files = os.listdir(dir)
-    files = fnmatch.filter(files, "*_064_*npy")
+
+    if not(pattern is None):
+        files = fnmatch.filter(files, pattern)
     files.sort()
 
     for j in xrange(files.__len__()):
@@ -37,10 +38,12 @@ def ShowImages(*args):
         s = np.clip(s, disrange[0], disrange[1])
         s -= s.min()
         s /= s.max()
-        vis.text(files[j], win="filename")
-        vis.image(s, win="Fuck")
+        vis.text(files[j], win="ShowImages_Filename")
+        vis.image(s, win="ShowImages")
 
     pass
+
+
 
 def CreateTrainingSamples(num, dir):
     """
@@ -207,10 +210,93 @@ def CheckDir(dir):
             fs = fnmatch.filter(files, f + "_" + suf + "_*")
             slices.append(str(len(fs)))
         print f + ": " + ",".join(slices)
+    print "Total: ", len(uniquesamples)
 
 
+def Normalize(array, lowerbound=None, upperbound=None, range=[0, 1]):
+    """
+    Description
+    -----------
+      Clip the image with lowerbound and upperbound and then normalize it to the given range.
+
+    :param np.ndarray array:
+    :param float lowerbound:
+    :param float upperbound:
+    :param list range:
+    :return: np.ndarray
+    """
+
+    assert isinstance(array, np.ndarray)
+    assert isinstance(range, list)
+
+    t = np.array(array, dtype=float)
+    if not (lowerbound is None or upperbound is None):
+        assert lowerbound < upperbound, "Lower bound must be less than upper bound!"
+        t = np.clip(t, lowerbound, upperbound)
+        t = t - lowerbound
+    else:
+        t = array
+        t = t - t.min()
+
+    if not (upperbound is None):
+        t = t * (range[1] - range[0]) / (upperbound -lowerbound) - range[0]
+    else:
+        t = t * (range[1] - range[0]) / t.max() - range[0]
+
+    return t
 
 
+def RotateImage(im):
+    """
+    Description
+    -----------
+      Rotate input image by 180 degrees
 
+    :param np.ndarray/str im:
+    :return:
+    """
+    if isinstance(im, np.ndarray):
+        return  np.rot90(np.rot90(im))
+    else:
+        assert os.path.isfile(im), "Cannot find file!"
 
+        image = np.load(im)
+        assert image.ndim == 2, "Cannot rotate 3D image!"
 
+        np.save(im, np.rot90(np.rot90(image)))
+
+def BatchRotateImage(dir, exception=[]):
+    """
+    Description
+    -----------
+      Rotate all the numpy images by 180 degrees clockwise if the image is 2D. Overwrites the image.
+
+    :param str dir:
+    :param list exception:
+    :return:
+    """
+
+    import multiprocessing as mpi
+
+    assert os.path.isdir(dir), "Directory doesn't exist!"
+    assert isinstance(exception, list), "Exception must be in form of a list!"
+
+    pool = mpi.Pool(processes=8)
+    process = []
+
+    fs = os.listdir(dir)
+    fs = fnmatch.filter(fs, "*.npy")
+    fs = [ff for ff in fs if not ff in exception]
+    fs.sort()
+
+    for ff in fs:
+        print "Working on ", ff
+        im = dir + "/" + ff
+        p = pool.apply_async(RotateImage, args=[im])
+        process.append(p)
+
+    for i in xrange(len(process)):
+        process[i].wait()
+        print "Progress: ", i * 100 / float(len(process)), "%"
+
+    pass
