@@ -130,7 +130,10 @@ def train(net, b, trainsteps, epoch=-1, plot=False, params=None):
             if (a.usecuda):
                 mk = mk.cuda()
 
+            # loss = (1 - ssim((output.squeeze() * mk).unsqueeze(1), (gt * mk).unsqueeze(1))) /  \
+            #        (1 - ssim((i3.squeeze() * mk).unsqueeze(1), (gt * mk).unsqueeze(1)))
             loss = ssim((output.squeeze() * mk).unsqueeze(1), (gt * mk).unsqueeze(1))
+            loss = 1 - loss
             loss = 1 - loss + criterion((output.squeeze())*mk, (gt)*mk) / normalize(i3 * mk, gt * mk)
         else:
             loss = criterion((output.squeeze())[mk], (gt)[mk]) / normalize(i3[mk], gt[mk])
@@ -211,14 +214,16 @@ def evalNet(net, targets, plot=True):
     assert targets.has_key(targetkey) and targets.has_key('ori'), \
             "Dictionary must contain data files with key %s and ori"%targetkey
 
-    # Set network to evaluation mode
+    # Set network to evaluation mode`
     net.eval()
 
     # Set the batch number the network can take without overflowing GPU memory
     offset = 5
     oi3 = targets[targetkey]
-    mk = targets['msk']
-
+    if a.invertmask:
+        mk = np.logical_not(targets['msk']) # inverted mask
+    else:
+        mk = targets['msk']
     # Calculate the interval indexes
     last = oi3.shape[0] % offset
     if last == 0:
