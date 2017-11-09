@@ -3,8 +3,9 @@ import numpy as np
 import os
 import fnmatch
 import visdom
+import IO
 
-vis = visdom.Visdom(port=80)
+vis = visdom.Visdom(server="http://223.255.146.2", port=8097)
 
 def ParseRootdir(dir):
     """
@@ -54,7 +55,7 @@ def FillHole2D(array, mask=True):
     im = sitk.GetImageFromArray(array)
     im = sitk.BinaryThreshold(im,  lowerThreshold=-400, upperThreshold=5000, insideValue=1)
     im = sitk.BinaryFillhole(im)
-    im = sitk.BinaryErode(im, 8)
+    im = sitk.BinaryErode(im, 9)
     im = sitk.BinaryDilate(im, 12)
 
     im = np.array(sitk.GetArrayFromImage(im), dtype=float)
@@ -124,7 +125,7 @@ def ProcessDirectory(dir):
     for i in xrange(len(fns)):
         print "Working on ", i
         fs = os.listdir(dir)
-        fs = fnmatch.filter(fs, fns[i] + "*_128_*")
+        fs = fnmatch.filter(fs, fns[i] + "*_ori_*")
         fs.sort()
         im = [np.load(dir + "/" + f) for f in fs]
         im = [img.reshape(1, img.shape[0], img.shape[1]) for img in im]
@@ -174,8 +175,111 @@ def ShowMaskOnVisdom(dir):
             vis.image(im2[j], win="Im2")
 
 
+def ApplyMask(im, mask, outvalue=-3024, inverse=False, output=None):
+    """
+    Description
+    -----------
+      Apply binary mask on image. Assume input to be ITK images
+
+    :param SimpleITK.Image im:   Input
+    :param SimpleITK.Image mask: Mask of input
+    :param float outvalue:
+    :param bool inverse
+    :return:
+    """
+
+    assert isinstance(inverse, bool), "Error in arguments!"
+    assert isinstance(im, sitk.Image) and isinstance(mask, sitk.Image), "Input is not sitkImages"
+    assert im.GetDimension() == mask.GetDimension(), "Image and mask must have same dimension!"
+
+    if (mask.GetPixelID() != sitk.sitkUInt8):
+        mask = sitk.Cast(mask, sitk.sitkUInt8)
+
+    maskfilter = sitk.MaskImageFilter()
+    maskfilter.SetOutsideValue(outvalue)
+    outputimage = maskfilter.Execute(im, mask)
+
+    if not(output is None):
+        print "Saving to ", output
+        sitk.WriteImage(outputimage, output)
+
+    del im, mask
+    return outputimage
+
+def BatchApplyMask(imlist, masklist, outvalue=-3024, inverse=False):
+    """
+    Description
+    -----------
+      Apply mask using the function ApplyMask.
+
+    :param imlist:
+    :param masklist:
+    :param outvalue:
+    :param inverse:
+    :return:
+    """
+    import multiprocessing as mpi
+
+    assert len(imlist) == len(masklist), "Image list and mask list has different length!"
+
+    # pool = mpi.Pool(processes=5)
+    # p = []
+    for i in xrange(len(imlist)):
+        imfn = imlist[i]
+        mkfn = masklist[i]
+        outfn = imfn.replace('processed', 'final')
+        if not(os.path.isfile(imfn) and os.path.isfile(mkfn)):
+            print "Path doesn't exist: ", imfn, mkfn
+            continue
+
+        im = sitk.ReadImage(imfn)
+        mk = sitk.ReadImage(mkfn)
+        ApplyMask(im, mk, outvalue, inverse, outfn)
+        # process = pool.apply_async(ApplyMask, args=[im, mk, outvalue, inverse, outfn])s
+        # print "Creating job: ", i
+        # p.append(process)
+    #
+    # for process in p:
+    #     process.wait()
+
+    pass
+
+def MaskedMerge(im1, im2, mask):
+    """
+    Description
+    -----------
+      Merge two images using a mask. The product will be the addition of
+      im1*mask and image2 * (-mask).
+
+      Assume all inputs are simple itk images.
+
+    :param im1:
+    :param im2:
+    :param mask:
+    :return:
+    """
+
+    assert isinstance(im1, sitk.Image) and isinstance(im2, sitk.Image), \
+        "Input image must be sitk images!"
+    assert isinstance(mask, sitk.Image), "Input mask must be sitk image!"
+
+    if (mask.GetPixelID() != sitk.sitkUInt8):
+        mask = sitk.Cast(mask, sitk.sitkUInt8)
+
+    maskfilter1 = sitk.MaskImageFilter()
+    masked1 = maskfilter1.Execute(im1, mask)
+
+    invertmask = sitk.InvertIntensity(mask)
+    maskfilter2 = sitk.MaskImageFilter()
+    masked2 = maskfilter2.Execute(im2, invertmask)
+
+    addfilter = sitk.AddImageFilter()
+    output = addfilter.Execute(masked1, masked2)
+
+    return output
+
 def main():
-    ShowMaskOnVisdom("../SIRT_Parallel_Slices/test")
+    ProcessDirectory("../SIRT_Parallel_Slices/train")
 
 if __name__ == '__main__':
     main()
