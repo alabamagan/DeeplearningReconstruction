@@ -4,6 +4,8 @@ import os
 import fnmatch
 import visdom
 import IO
+import multiprocessing as mpi
+
 
 vis = visdom.Visdom(server="http://223.255.146.2", port=8097)
 
@@ -218,16 +220,20 @@ def BatchApplyMask(imlist, masklist, outvalue=-3024, inverse=False):
     :param inverse:
     :return:
     """
-    import multiprocessing as mpi
 
     assert len(imlist) == len(masklist), "Image list and mask list has different length!"
 
-    # pool = mpi.Pool(processes=5)
-    # p = []
+    pool = mpi.Pool(processes=5)
+    p = []
     for i in xrange(len(imlist)):
         imfn = imlist[i]
         mkfn = masklist[i]
-        outfn = imfn.replace('processed', 'final')
+
+        # Skip all masked images
+        if imfn.find('m') != -1:
+            continue
+
+        outfn = imfn.replace('.nii.gz', 'm.nii.gz')
         if not(os.path.isfile(imfn) and os.path.isfile(mkfn)):
             print "Path doesn't exist: ", imfn, mkfn
             continue
@@ -235,12 +241,12 @@ def BatchApplyMask(imlist, masklist, outvalue=-3024, inverse=False):
         im = sitk.ReadImage(imfn)
         mk = sitk.ReadImage(mkfn)
         ApplyMask(im, mk, outvalue, inverse, outfn)
-        # process = pool.apply_async(ApplyMask, args=[im, mk, outvalue, inverse, outfn])s
-        # print "Creating job: ", i
-        # p.append(process)
-    #
-    # for process in p:
-    #     process.wait()
+        process = pool.apply_async(ApplyMask, (im, mk, outvalue, inverse, outfn))
+        print "Creating job: ", i
+        p.append(process)
+
+    for process in p:
+        process.wait()
 
     pass
 

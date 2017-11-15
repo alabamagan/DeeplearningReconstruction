@@ -77,7 +77,7 @@ def BatchSSIM(dir):
 
     b = NiiDataLoader(dir, tonumpy=True)
 
-    d = ['SIRT', 'SART', 'FBPpb', 'FBPpbh', 'processed']
+    d = ['SIRTm', 'SARTm', 'FBPpbm', 'FBPpbhm', 'processedm']
 
     g = {}
     for key in d:
@@ -128,7 +128,7 @@ def CNR(x, y, noise):
     return np.abs(x.mean() - y.mean()) / noise.var()
 
 
-def HarlickTextureFeatures(x):
+def HarlickTextureFeatures(x, range=None):
     """
     Description
     -----------
@@ -144,12 +144,42 @@ def HarlickTextureFeatures(x):
     :return:
     """
 
-    assert isinstance(x, np.ndarray(x)), "Input must be numpy array!"
+    assert isinstance(x, np.ndarray), "Input must be numpy array!"
     assert x.ndim == 2, "Input must be 2D!"
 
-    x = ImageRebining(x, np.uint8)
+    x = ImageRebining(x, np.uint8, range)
 
-    return greycomatrix(x, [1], np.linspace(0, 2*np.pi, 33)[-1])
+    return greycomatrix(x, [1], np.linspace(0, 2*np.pi, 10)[:-1])
+
+
+def HarlickDistance(x, y, customrange = None):
+    """
+    Description
+    -----------
+      Compute the normalized distance between two harlick feature matrices by the following equation
+
+        D(x, y) = \sqrt{\sum_i \left(\frac{h_i(x) - h_i(y)}{h_i(y)} \right)}
+
+      Note that y is considered as normalization factor (i.e. groundtruth) when doing comparisons.
+
+    :param x:
+    :param y:
+    :return:
+    """
+
+    assert x.shape == y.shape, "Dimension of two image must be the same!gx"
+
+    if customrange is None:
+        X = HarlickTextureFeatures(x, [y.min(), y.max()]) # y should be the same image if comparison is to be done
+        Y = HarlickTextureFeatures(y)
+    else:
+        X = HarlickTextureFeatures(x, customrange)
+        Y = HarlickTextureFeatures(y, customrange)
+
+    X, Y = [np.array(G, dtype=np.int64) for G in [X, Y]]
+
+    diff = np.abs((X - Y)).sum() / float(X.flatten().shape[0])
+    return diff
 
 
 def ImageRebining(x, datatype, customrange=None):
@@ -165,7 +195,7 @@ def ImageRebining(x, datatype, customrange=None):
     :return:
     """
 
-    assert isinstance(datatype, np.dtype)
+    assert isinstance(datatype, type)
 
     x = np.array(x, dtype=np.float64)
     if customrange is None:
@@ -179,7 +209,69 @@ def ImageRebining(x, datatype, customrange=None):
         x -= customrange[0]
         x /= customrange[1] - customrange[0]
 
-    levels = 2**(datatype.itemsize * 8) - 1
+    levels = 2**(datatype(0).itemsize * 8) - 1
     x *= levels
     return np.array(x, dtype=datatype)
 
+def MSE(x, y):
+    """
+    Description
+    -----------
+      Return the MSE difference of the two images
+
+    :param np.ndarray x:
+    :param np.ndarray y:
+    :return:
+    """
+    assert isinstance(x, np.ndarray) and isinstance(x, np.ndarray), "Input num be numpy arrays"
+    assert x.shape == y.shape, "Two images must have same dimensions"
+
+    d = (x - y)**2 / float(x.flatten().shape[0])
+    return d.sum()
+
+def PSNR(x, y):
+    """
+    Description
+    -----------
+      Return the PSNR of the input image where one is assumed to be a lossless groundtruth. Uses the
+      following equation:
+
+        PSNR = 10 \cdot log_10 \left(\frac{MAX_I^2}{MSE} \right)
+
+
+
+    :param np.ndarray x:
+    :param np.ndarray y:
+    :return:
+    """
+
+    # MAX_I = 2**(x.dtype.itemsize) - 1
+    MAX_I = 2**16 - 1
+
+    return 20 * np.log10(MAX_I / np.sqrt(MSE(x, y)))
+
+def BatchPSNR(dir):
+    """
+
+    :param dir:
+    :return:
+    """
+    assert os.path.isdir(dir), "Directory doesn't exist!"
+
+    b = NiiDataLoader(dir, tonumpy=True)
+
+    import csv
+    k = ['SIRTm', 'SARTm', 'FBPpbm', 'FBPpbhm', 'processedm']
+    f = file(dir + "/Result_PSNR.csv", 'wb')
+    writer = csv.writer(f)
+    writer.writerow(['Data', 'Number of Projections', 'Recon Method', 'Slice Number', 'PSNR', 'RMSE'])
+    for i in xrange(len(b)):
+        if not b[i].has_key('groundtruthm'):
+            continue
+        for j in xrange(len(b[i]['groundtruthm'])):
+            for keys in k:
+                line = [b.unique_prefix[i], dir.split('_')[-1], j + 1, keys]
+                line.append(PSNR(b[i][keys][j], b[i]['groundtruthm'][j]))
+                line.append(np.sqrt(MSE(b[i][keys][j], b[i]['groundtruthm'][j])))
+                writer.writerow(line)
+    f.close()
